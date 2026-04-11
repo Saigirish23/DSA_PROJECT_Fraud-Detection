@@ -28,9 +28,14 @@ MODELS_DIR = os.path.join(PROJECT_ROOT, "models")
 
 # Specific file paths
 RAW_TRANSACTIONS_PATH = os.path.join(RAW_DATA_DIR, "transactions.csv")
+ACCOUNT_GROUND_TRUTH_PATH = os.path.join(RAW_DATA_DIR, "account_ground_truth.csv")
 NODE_FEATURES_PATH = os.path.join(PROCESSED_DATA_DIR, "node_features.csv")
 LABELS_PATH = os.path.join(PROCESSED_DATA_DIR, "labels.csv")
 BEST_MODEL_PATH = os.path.join(MODELS_DIR, "best_gcn.pt")
+
+# Compatibility aliases used by audit scripts
+RAW_DIR = RAW_DATA_DIR
+PROCESSED_DIR = PROCESSED_DATA_DIR
 
 # =============================================================================
 # Random Seeds (for reproducibility)
@@ -69,6 +74,10 @@ GNN_NUM_CLASSES = 2         # Binary classification (normal, fraud)
 GNN_DROPOUT = 0.5           # Dropout rate
 GNN_NUM_LAYERS = 2          # Number of GCN layers
 
+# Compatibility alias used by some harnesses
+HIDDEN_DIM = GNN_HIDDEN_DIM
+SEED = RANDOM_SEED
+
 # =============================================================================
 # Training Hyperparameters
 # =============================================================================
@@ -76,7 +85,10 @@ LEARNING_RATE = 0.01
 WEIGHT_DECAY = 5e-4
 NUM_EPOCHS = 200
 LOG_INTERVAL = 10           # Log metrics every N epochs
-TRAIN_RATIO = 0.8           # 80/20 train/test split
+# Leakage-safe split ratios
+TRAIN_RATIO = 0.7
+VAL_RATIO = 0.15
+TEST_RATIO = 0.15
 
 # =============================================================================
 # Hybrid Model Parameters
