@@ -18,3 +18,4 @@ matplotlib==3.10.8
 # Utilities
 tqdm==4.67.3
 scipy==1.15.3
+flask

@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>FraudGraph — Transaction Network Fraud Detector</title>
+<link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+<header>
+  <div>
+    <div class="logo">Fraud<span>Graph</span></div>
+    <div style="font-size:0.72rem;color:var(--muted);margin-top:4px">Fraud Detection in Transaction Graphs · Using GNNs and Graph Heuristics</div>
+  </div>
+  <div style="display:flex;align-items:center;gap:12px;font-size:0.7rem;color:var(--muted)">
+    <span>DSA Core: C++ · GNN: PyTorch Geometric</span>
+    <div class="status-badge">
+      <div class="status-dot"></div>
+      <span id="cppStatusText">C++ Backend: Checking...</span>
+    </div>
+  </div>
+</header>
+
+<main>
+
+  <div class="alert-banner">
+    <div class="alert-icon">⚠</div>
+    <div class="alert-text" id="alertText">
+      <strong>Loading live metrics...</strong>
+    </div>
+  </div>
+
+  <div class="metrics-row">
+    <div class="card">
+      <div class="card-label">Total Nodes</div>
+      <div class="card-value accent" id="totalNodes">—</div>
+      <div class="card-sub">Accounts in graph</div>
+    </div>
+    <div class="card fraud-card">
+      <div class="card-label">Flagged Fraud</div>
+      <div class="card-value fraud" id="fraudCount">—</div>
+      <div class="card-sub">Heuristic label = 1</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Fraud Ratio</div>
+      <div class="card-value" style="color:var(--warn)" id="cycleCount">—</div>
+      <div class="card-sub">Share of flagged accounts</div>
+    </div>
+    <div class="card">
+      <div class="card-label">Best F1</div>
+      <div class="card-value safe" id="aucScore">—</div>
+      <div class="card-sub">From model comparison</div>
+    </div>
+  </div>
+
+  <div class="card graph-section">
+    <div class="section-title">Node Feature Distributions</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <canvas id="degreeChart" style="width:100%;height:180px;background:var(--surface2);border:1px solid var(--border);border-radius:8px"></canvas>
+      <canvas id="clusteringChart" style="width:100%;height:180px;background:var(--surface2);border:1px solid var(--border);border-radius:8px"></canvas>
+      <canvas id="pagerankChart" style="width:100%;height:180px;background:var(--surface2);border:1px solid var(--border);border-radius:8px"></canvas>
+      <canvas id="betweennessChart" style="width:100%;height:180px;background:var(--surface2);border:1px solid var(--border);border-radius:8px"></canvas>
+    </div>
+    <div class="legend" style="margin-top:10px">
+      <div class="legend-item"><div class="legend-dot" style="background:var(--fraud)"></div> Degree</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--warn)"></div> Clustering</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--safe)"></div> PageRank</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Betweenness</div>
+    </div>
+    <div class="algo-chips" id="algoChips">
+      <div class="algo-chip active">Degree</div>
+      <div class="algo-chip active">Clustering Coefficient</div>
+      <div class="algo-chip active">PageRank</div>
+      <div class="algo-chip active">Betweenness</div>
+      <div class="algo-chip">GNN Layer</div>
+      <div class="algo-chip">Hybrid Scoring</div>
+    </div>
+  </div>
+
+  <div class="card histogram-section">
+    <div class="section-title">Fraud Distribution</div>
+    <canvas id="histCanvas"></canvas>
+    <div style="margin-top:10px;font-size:0.72rem;color:var(--muted)" id="donutStats">No label data available.</div>
+    <div style="margin-top:20px">
+      <div class="section-title" style="font-size:0.8rem">C++ vs Python Performance</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:0.7rem">
+        <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--surface2)">
+          <strong style="color:var(--accent)">C++ (Graph Algorithms)</strong>
+          <div style="margin-top:6px;color:var(--muted)">Computes degree, clustering, PageRank, and betweenness via compiled binary for faster feature extraction.</div>
+        </div>
+        <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:var(--surface2)">
+          <strong style="color:var(--safe)">Python (GNN + ML)</strong>
+          <div style="margin-top:6px;color:var(--muted)">Consumes engineered features, trains GNN models, and performs hybrid evaluation and metric reporting.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card table-section">
+    <div class="section-title">Top Suspicious Nodes — Ranked by Heuristic Score</div>
+    <div style="overflow-x:auto">
+      <table class="score-table">
+        <thead>
+          <tr>
+            <th>Node ID</th>
+            <th>Total Degree</th>
+            <th>Clustering</th>
+            <th>PageRank</th>
+            <th>Betweenness</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody id="nodeTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card table-section">
+    <div class="section-title">Model Comparison</div>
+    <div style="overflow-x:auto">
+      <table class="score-table">
+        <thead>
+          <tr>
+            <th>Model</th>
+            <th>Accuracy</th>
+            <th>Precision</th>
+            <th>Recall</th>
+            <th>F1</th>
+            <th>ROC-AUC</th>
+          </tr>
+        </thead>
+        <tbody id="modelTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="card table-section">
+    <div class="section-title">Training Loss Curve</div>
+    <canvas id="trainingLossCanvas" style="width:100%;height:280px;background:var(--surface2);border:1px solid var(--border);border-radius:8px"></canvas>
+    <div id="trainingFallback" style="margin-top:10px;font-size:0.72rem;color:var(--muted)"></div>
+  </div>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="/static/charts.js"></script>
+</body>
+</html>

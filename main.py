@@ -53,13 +53,10 @@ def main():
     logger.info("\n>>> PHASE 4: Rule-based Heuristics")
     scored_df = compute_fraud_scores(features_df)
     labels_df = generate_heuristic_labels(scored_df)
-    
-    # Extract labels series for downstream
-    labels_series = labels_df.set_index("node_id")["heuristic_label"]
 
     # Phase 5: PyTorch Geometric Data Prep
     logger.info("\n>>> PHASE 5: PyG Data Preparation")
-    data, scaler, node_to_idx = build_pyg_data(G, features_df, labels_series)
+    data, scaler, node_to_idx = build_pyg_data(G, features_df)
 
     # Phase 6: GNN Model Training
     logger.info("\n>>> PHASE 6: GNN Model Training")
@@ -79,6 +76,18 @@ def main():
     logger.info("  - %s (Plots & Visualizations)", config.PLOTS_DIR)
     logger.info("  - %s (Metrics & Results)", config.RESULTS_DIR)
     logger.info("  - %s (Trained Models)", config.MODELS_DIR)
+
+    # Phase bonus: save training history for dashboard
+    # (only if history dict exists from train())
+    if history:
+        import pandas as pd
+
+        pd.DataFrame(history).to_csv(
+            "outputs/results/training_history.csv", index=False
+        )
+        print("Training history saved for dashboard.")
+
+    print("\nTo view results dashboard: python3 dashboard/dashboard_server.py")
 
 
 if __name__ == "__main__":
