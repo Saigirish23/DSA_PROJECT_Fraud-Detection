@@ -1,24 +1,31 @@
 # Python
 __pycache__/
 *.py[cod]
+*.pyo
+*.pyd
+.Python
 *.egg-info/
 .env
 venv/
 .venv/
 
-# Model checkpoints (large binary files)
+# C++ build artifacts
+cpp/graph_algorithms
+cpp/*.o
+
+# Model checkpoints
 models/*.pt
 models/*.pth
 
-# Outputs (regeneratable)
+# Generated outputs (regeneratable)
 outputs/plots/*.png
 outputs/results/*.csv
 
-# Data (raw data should not be committed unless synthetic)
+# Raw data
 data/raw/*.csv
 
-# Jupyter
-.ipynb_checkpoints/
+# Archive folder
+_archive/
 
 # OS
 .DS_Store
@@ -27,6 +34,9 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+*.swp
+*.swo
 
-# Validation script (not part of the project)
-validate_env.py
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
