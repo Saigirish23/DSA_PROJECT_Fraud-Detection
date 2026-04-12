@@ -1,46 +1,47 @@
-"""
-gnn_model.py — GCN Model Definition
-
-Implements a 2-layer Graph Convolutional Network (GCN) for node-level
-binary classification (fraud vs. normal).
-
-Architecture:
-    Input (num_features) → GCNConv(hidden_dim) → ReLU → Dropout(0.5)
-                         → GCNConv(num_classes) → LogSoftmax → Output (2 classes)
-
-The GCN layer performs message passing:
-    h_v^(l+1) = σ( Σ (1/√(d_u · d_v)) · W^(l) · h_u^(l) )
-                  u ∈ N(v) ∪ {v}
-
-where d_u and d_v are node degrees, W is a learnable weight matrix,
-and σ is a nonlinear activation (ReLU).
-
-All hyperparameters (hidden_dim, dropout, num_layers) are sourced from config.py.
-"""
+"""GNN model definition using GAT + GraphSAGE fusion."""
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv
+from torch_geometric.nn import GATConv, SAGEConv
 
 import config
 
 logger = config.setup_logging(__name__)
 
 
-class FraudGCN(torch.nn.Module):
-    """
-    2-Layer Graph Convolutional Network for fraud detection.
+class GATLayer(nn.Module):
+    def __init__(self, in_ch, hidden_ch, out_ch, heads, dropout):
+        super().__init__()
+        self.conv1 = GATConv(in_ch, hidden_ch, heads=heads, dropout=dropout)
+        self.conv2 = GATConv(hidden_ch * heads, out_ch, heads=1, concat=False, dropout=dropout)
+        self.bn1 = nn.BatchNorm1d(hidden_ch * heads)
+        self.drop = nn.Dropout(dropout)
 
-    This model learns to classify nodes (accounts) as fraudulent or normal
-    by propagating and aggregating information from neighboring nodes in
-    the transaction graph.
+    def forward(self, x, edge_index):
+        x = F.elu(self.bn1(self.conv1(x, edge_index)))
+        x = self.drop(x)
+        x = self.conv2(x, edge_index)
+        return x
 
-    Args:
-        num_features (int): Number of input features per node.
-        hidden_dim (int): Dimension of the hidden layer. Default from config.
-        num_classes (int): Number of output classes. Default 2 (normal, fraud).
-        dropout (float): Dropout probability. Default from config.
-    """
+
+class SAGELayer(nn.Module):
+    def __init__(self, in_ch, hidden_ch, out_ch, dropout):
+        super().__init__()
+        self.conv1 = SAGEConv(in_ch, hidden_ch)
+        self.conv2 = SAGEConv(hidden_ch, out_ch)
+        self.bn1 = nn.BatchNorm1d(hidden_ch)
+        self.drop = nn.Dropout(dropout)
+
+    def forward(self, x, edge_index):
+        x = F.relu(self.bn1(self.conv1(x, edge_index)))
+        x = self.drop(x)
+        x = self.conv2(x, edge_index)
+        return x
+
+
+class FraudGCN(nn.Module):
+    """Compatibility class name with reference-style GAT+SAGE internals."""
 
     def __init__(self, num_features, hidden_dim=None, num_classes=None, dropout=None):
         super(FraudGCN, self).__init__()
@@ -48,20 +49,20 @@ class FraudGCN(torch.nn.Module):
         self.hidden_dim = hidden_dim or config.GNN_HIDDEN_DIM
         self.num_classes = num_classes or config.GNN_NUM_CLASSES
         self.dropout_rate = dropout or config.GNN_DROPOUT
+        self.heads = 4
 
-        # Layer 1: Input → Hidden
-        # GCNConv applies spectral convolution (Kipf & Welling, 2017)
-        # It aggregates features from 1-hop neighbors, weighted by degree normalization
-        self.conv1 = GCNConv(num_features, self.hidden_dim)
+        self.gat = GATLayer(num_features, self.hidden_dim, self.hidden_dim, self.heads, self.dropout_rate)
+        self.sage = SAGELayer(num_features, self.hidden_dim, self.hidden_dim, self.dropout_rate)
+        self.fusion = nn.Sequential(
+            nn.Linear(self.hidden_dim * 2, self.hidden_dim),
+            nn.ReLU(),
+            nn.Dropout(self.dropout_rate),
+            nn.Linear(self.hidden_dim, self.num_classes),
+        )
 
-        # Layer 2: Hidden → Output
-        # Second GCN layer captures 2-hop neighborhood information
-        # This means each node's prediction is influenced by nodes up to 2 edges away
-        self.conv2 = GCNConv(self.hidden_dim, self.num_classes)
-
-        logger.info("FraudGCN initialized:")
+        logger.info("FraudGCN initialized (GAT+SAGE fusion):")
         logger.info("  Input: %d features → Hidden: %d → Output: %d classes",
-                     num_features, self.hidden_dim, self.num_classes)
+                num_features, self.hidden_dim, self.num_classes)
         logger.info("  Dropout: %.2f", self.dropout_rate)
 
     def forward(self, x, edge_index):
@@ -75,18 +76,14 @@ class FraudGCN(torch.nn.Module):
         Returns:
             torch.Tensor: Log-softmax probabilities [N, num_classes].
         """
-        # Layer 1: Graph convolution → ReLU activation → Dropout
-        # ReLU introduces nonlinearity, allowing the model to learn complex patterns
-        # Dropout regularizes by randomly zeroing features during training
-        h = self.conv1(x, edge_index)
-        h = F.relu(h)
-        h = F.dropout(h, p=self.dropout_rate, training=self.training)
+        gat_out = self.gat(x, edge_index)
+        sage_out = self.sage(x, edge_index)
+        combined = torch.cat([gat_out, sage_out], dim=-1)
+        return self.fusion(combined)
 
-        # Layer 2: Graph convolution → LogSoftmax for classification
-        # LogSoftmax is used with NLLLoss (equivalent to CrossEntropyLoss with raw logits)
-        h = self.conv2(h, edge_index)
-
-        return F.log_softmax(h, dim=1)
+    def predict_proba(self, x, edge_index):
+        logits = self.forward(x, edge_index)
+        return F.softmax(logits, dim=-1)[:, 1]
 
     def get_embeddings(self, x, edge_index):
         """
@@ -103,8 +100,9 @@ class FraudGCN(torch.nn.Module):
         """
         self.eval()
         with torch.no_grad():
-            h = self.conv1(x, edge_index)
-            h = F.relu(h)
+            gat_out = self.gat(x, edge_index)
+            sage_out = self.sage(x, edge_index)
+            h = torch.cat([gat_out, sage_out], dim=-1)
         return h
 
 

@@ -66,7 +66,7 @@ HEURISTIC_FRAUD_THRESHOLD = 0.15  # Top 15% → fraud = 1
 # =============================================================================
 GNN_HIDDEN_DIM = 64         # Hidden layer dimension
 GNN_NUM_CLASSES = 2         # Binary classification (normal, fraud)
-GNN_DROPOUT = 0.5           # Dropout rate
+GNN_DROPOUT = 0.3           # Dropout rate
 GNN_NUM_LAYERS = 2          # Number of GCN layers
 
 # Compatibility alias used by some harnesses
@@ -76,8 +76,8 @@ SEED = RANDOM_SEED
 # =============================================================================
 # Training Hyperparameters
 # =============================================================================
-LEARNING_RATE = 0.01
-WEIGHT_DECAY = 5e-4
+LEARNING_RATE = 0.005
+WEIGHT_DECAY = 1e-4
 NUM_EPOCHS = 200
 LOG_INTERVAL = 10           # Log metrics every N epochs
 # Leakage-safe split ratios

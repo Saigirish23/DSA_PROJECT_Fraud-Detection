@@ -18,8 +18,8 @@ import os
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from sklearn.metrics import f1_score
+from sklearn.metrics import roc_auc_score
 
 import config
 from src.gnn_model import FraudGCN
@@ -94,11 +94,12 @@ def train_model(data, device="cpu"):
     logger.info("  Optimizer: Adam (lr=%.4f, weight_decay=%.4f)",
                 config.LEARNING_RATE, config.WEIGHT_DECAY)
 
-    # Loss function: NLLLoss with class weights
+    # Loss function: CrossEntropyLoss with class weights
     class_weights = compute_class_weights(data.y.cpu(), data.train_mask.cpu())
     class_weights = class_weights.to(device)
-    criterion = torch.nn.NLLLoss(weight=class_weights)
-    logger.info("  Loss: NLLLoss with class weights")
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
+    logger.info("  Loss: CrossEntropyLoss with class weights")
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=config.NUM_EPOCHS)
     logger.info("  Epochs: %d, Log interval: %d", config.NUM_EPOCHS, config.LOG_INTERVAL)
     logger.info("-" * 60)
 
@@ -106,11 +107,13 @@ def train_model(data, device="cpu"):
     history = {
         "train_loss": [],
         "train_acc": [],
+        "val_acc": [],
+        "val_f1": [],
         "test_acc": [],
         "test_f1": [],
     }
 
-    best_f1 = 0.0
+    best_val_auc = 0.0
     best_epoch = 0
 
     for epoch in range(1, config.NUM_EPOCHS + 1):
@@ -123,6 +126,7 @@ def train_model(data, device="cpu"):
 
         loss.backward()
         optimizer.step()
+        scheduler.step()
 
         # --- Evaluation ---
         model.eval()
@@ -145,15 +149,25 @@ def train_model(data, device="cpu"):
                 zero_division=0
             )
 
+            # Validation metrics for model selection
+            val_correct = pred[data.val_mask] == data.y[data.val_mask]
+            val_acc = val_correct.sum().item() / data.val_mask.sum().item()
+            val_prob = torch.softmax(out[data.val_mask], dim=1)[:, 1].cpu().numpy()
+            val_true = data.y[data.val_mask].cpu().numpy()
+            val_f1 = f1_score(val_true, pred[data.val_mask].cpu().numpy(), zero_division=0)
+            val_auc = roc_auc_score(val_true, val_prob) if len(np.unique(val_true)) > 1 else 0.5
+
         # Record history
         history["train_loss"].append(loss.item())
         history["train_acc"].append(train_acc)
+        history["val_acc"].append(val_acc)
+        history["val_f1"].append(val_f1)
         history["test_acc"].append(test_acc)
         history["test_f1"].append(test_f1)
 
-        # Save best model
-        if test_f1 > best_f1:
-            best_f1 = test_f1
+        # Save best model using validation AUC (reference-style selection)
+        if val_auc > best_val_auc:
+            best_val_auc = val_auc
             best_epoch = epoch
             config.ensure_dirs()
             torch.save(model.state_dict(), config.BEST_MODEL_PATH)
@@ -161,13 +175,13 @@ def train_model(data, device="cpu"):
         # Periodic logging
         if epoch % config.LOG_INTERVAL == 0 or epoch == 1:
             logger.info(
-                "  Epoch %3d/%d | Loss: %.4f | Train Acc: %.4f | Test Acc: %.4f | Test F1: %.4f",
-                epoch, config.NUM_EPOCHS, loss.item(), train_acc, test_acc, test_f1
+                "  Epoch %3d/%d | Loss: %.4f | Train Acc: %.4f | Val AUC: %.4f | Test Acc: %.4f | Test F1: %.4f",
+                epoch, config.NUM_EPOCHS, loss.item(), train_acc, val_auc, test_acc, test_f1
             )
 
     logger.info("-" * 60)
     logger.info("  Training complete!")
-    logger.info("  Best Test F1: %.4f (epoch %d)", best_f1, best_epoch)
+    logger.info("  Best Validation AUC: %.4f (epoch %d)", best_val_auc, best_epoch)
     logger.info("  Model saved to %s", config.BEST_MODEL_PATH)
 
     # Load best model
@@ -194,7 +208,7 @@ def get_gnn_predictions(model, data, device="cpu"):
 
     with torch.no_grad():
         out = model(data.x, data.edge_index)
-        probs = torch.exp(out)  # Convert log-probs to probabilities
+        probs = torch.softmax(out, dim=1)
         preds = out.argmax(dim=1)
 
     return preds.cpu(), probs.cpu()

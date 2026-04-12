@@ -104,23 +104,23 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
         if node_key in node_to_idx:
             y[node_to_idx[node_key]] = int(label)
 
-    # Stratified split (70/15/15) for leakage-safe model selection.
+    # Match reference-style split: 70/30 then 80/20 on train.
     indices = np.arange(num_nodes)
-    train_idx, temp_idx = train_test_split(
+    train_idx, test_idx = train_test_split(
         indices,
-        test_size=(1.0 - config.TRAIN_RATIO),
+        test_size=0.3,
         stratify=y.numpy(), random_state=config.RANDOM_SEED
     )
 
-    temp_labels = y.numpy()[temp_idx]
-    val_rel_idx, test_rel_idx = train_test_split(
-        np.arange(len(temp_idx)),
-        test_size=0.5,
-        stratify=temp_labels,
+    train_labels = y.numpy()[train_idx]
+    tr_rel_idx, val_rel_idx = train_test_split(
+        np.arange(len(train_idx)),
+        test_size=0.2,
+        stratify=train_labels,
         random_state=config.RANDOM_SEED,
     )
-    val_idx = temp_idx[val_rel_idx]
-    test_idx = temp_idx[test_rel_idx]
+    val_idx = train_idx[val_rel_idx]
+    train_idx = train_idx[tr_rel_idx]
 
     # Normalize all features (including heuristic score) with train-only fit.
     scaler = StandardScaler()
@@ -158,7 +158,7 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
     total = class_counts.sum()
     weights = total / (len(class_counts) * class_counts + 1e-8)
     class_weights = torch.tensor(weights, dtype=torch.float32).to(device)
-    criterion = torch.nn.NLLLoss(weight=class_weights)
+    criterion = torch.nn.CrossEntropyLoss(weight=class_weights)
 
     # Training loop
     history = {"train_loss": [], "val_f1": [], "test_f1": []}
@@ -206,7 +206,7 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
 
     with torch.no_grad():
         out = model(data.x, data.edge_index)
-        probs = torch.exp(out).cpu()
+        probs = torch.softmax(out, dim=1).cpu()
         preds = out.argmax(dim=1).cpu()
 
     # Compute metrics on test set

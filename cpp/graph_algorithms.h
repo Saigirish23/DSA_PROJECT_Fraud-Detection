@@ -35,7 +35,7 @@ unordered_map<string, double> compute_clustering(
 unordered_map<string, double> compute_pagerank(
     const vector<pair<string, string>>& edges,
     const vector<string>& nodes,
-    int iterations = 100, double damping = 0.85);
+    int iterations = 100, double damping = 0.85, double tol = 1e-6);
 
 unordered_map<string, double> compute_betweenness(
     const vector<pair<string, string>>& edges,

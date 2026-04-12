@@ -157,7 +157,8 @@ unordered_map<string, double> compute_pagerank(
     const vector<pair<string, string>>& edges,
     const vector<string>& nodes,
     int iterations,
-    double damping) {
+    double damping,
+    double tol) {
     unordered_map<string, vector<string>> out_adj;
     unordered_map<string, vector<string>> in_adj;
     out_adj.reserve(nodes.size());
@@ -203,7 +204,12 @@ unordered_map<string, double> compute_pagerank(
             new_rank[v] += damping * incoming;
         }
 
+        double diff = 0.0;
+        for (const string& v : nodes) {
+            diff += abs(new_rank[v] - rank[v]);
+        }
         rank.swap(new_rank);
+        if (diff < tol) break;
     }
 
     return rank;

@@ -359,24 +359,24 @@ def build_pyg_data(G, features_df, labels_series=None):
     y_np = np.array([int(ground_truth.get(str(n), 0)) for n in nodes], dtype=np.int64)
     y = torch.tensor(y_np, dtype=torch.long)
 
-    # 70/15/15 split to avoid selecting model by test set.
+    # Match reference-style split: 70/30 then 80/20 on train -> 56/14/30.
     indices = np.arange(num_nodes)
-    train_idx, temp_idx = train_test_split(
+    train_idx, test_idx = train_test_split(
         indices,
-        test_size=(1.0 - config.TRAIN_RATIO),
+        test_size=0.3,
         stratify=y_np,
         random_state=config.RANDOM_SEED,
     )
 
-    temp_labels = y_np[temp_idx]
-    val_relative_idx, test_relative_idx = train_test_split(
-        np.arange(len(temp_idx)),
-        test_size=0.5,
-        stratify=temp_labels,
+    train_labels = y_np[train_idx]
+    tr_relative_idx, val_relative_idx = train_test_split(
+        np.arange(len(train_idx)),
+        test_size=0.2,
+        stratify=train_labels,
         random_state=config.RANDOM_SEED,
     )
-    val_idx = temp_idx[val_relative_idx]
-    test_idx = temp_idx[test_relative_idx]
+    val_idx = train_idx[val_relative_idx]
+    train_idx = train_idx[tr_relative_idx]
 
     train_mask = torch.zeros(num_nodes, dtype=torch.bool)
     val_mask = torch.zeros(num_nodes, dtype=torch.bool)
