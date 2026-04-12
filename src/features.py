@@ -17,6 +17,8 @@ Features computed:
 import networkx as nx
 import numpy as np
 import pandas as pd
+import os
+import sys
 
 import config
 
@@ -47,6 +49,7 @@ def compute_degree(G):
         dict: {node_id: {"in_degree": int, "out_degree": int, "total_degree": int}}
     """
     logger.info("  Computing degree features... [O(V+E)]")
+    # high-degree nodes interact with many accounts, which can be a fraud signal
 
     degree_features = {}
     for node in G.nodes():
@@ -61,7 +64,7 @@ def compute_degree(G):
     return degree_features
 
 
-def compute_clustering_coefficient(G):
+def compute_clustering(G):
     """
     Compute the clustering coefficient for each node.
 
@@ -94,6 +97,7 @@ def compute_clustering_coefficient(G):
         dict: {node_id: float} — clustering coefficient in [0, 1].
     """
     logger.info("  Computing clustering coefficients... [O(V·d²)]")
+    # low clustering often means a node connects otherwise unrelated accounts
 
     # Use undirected version for triangle counting
     undirected = G.to_undirected()
@@ -137,12 +141,13 @@ def compute_pagerank(G):
     """
     logger.info("  Computing PageRank... [O(k·(V+E)), k=100 max iterations]")
 
+    # standard pagerank with damping factor 0.85
     pagerank = nx.pagerank(G, alpha=0.85, max_iter=100, tol=1e-6)
 
     return pagerank
 
 
-def compute_betweenness_centrality(G):
+def compute_betweenness(G):
     """
     Compute betweenness centrality for each node.
 
@@ -179,12 +184,13 @@ def compute_betweenness_centrality(G):
     """
     logger.info("  Computing betweenness centrality... [O(V·E)] (may take a moment)")
 
+    # normalized=True keeps values comparable across graph sizes
     betweenness = nx.betweenness_centrality(G, normalized=True)
 
     return betweenness
 
 
-def compute_all_features(G):
+def compute_features(G):
     """
     Compute all graph-structural features for every node.
 
@@ -201,11 +207,74 @@ def compute_all_features(G):
     """
     logger.info("Computing all graph-structural features...")
 
+    # Try C++ backend first (fast path), but keep output schema identical
+    # to the existing NetworkX pipeline expectations.
+    try:
+        cpp_dir = os.path.join(os.path.dirname(__file__), "..", "cpp")
+        if cpp_dir not in sys.path:
+            sys.path.insert(0, cpp_dir)
+        from graph_runner import run_cpp_algorithms
+
+        edge_file = config.RAW_TRANSACTIONS_PATH
+        cpp_result = run_cpp_algorithms(edge_file)
+
+        if cpp_result is not None:
+            graph_nodes = set(str(n) for n in G.nodes())
+            cpp_nodes = set(str(n) for n in cpp_result.index)
+            if graph_nodes == cpp_nodes:
+                logger.info("  Using C++ computed features")
+
+                records = []
+                for node in sorted(G.nodes()):
+                    n = str(node)
+                    in_deg = int(G.in_degree(node))
+                    out_deg = int(G.out_degree(node))
+                    degree = int(cpp_result.at[n, "degree"])
+                    records.append({
+                        "node_id": n,
+                        "in_degree": in_deg,
+                        "out_degree": out_deg,
+                        "total_degree": degree,
+                        "clustering_coefficient": float(cpp_result.at[n, "clustering"]),
+                        "pagerank": float(cpp_result.at[n, "pagerank"]),
+                        "betweenness_centrality": float(cpp_result.at[n, "betweenness"]),
+                    })
+
+                features_df = pd.DataFrame(records)
+                config.ensure_dirs()
+                features_df.to_csv(config.NODE_FEATURES_PATH, index=False)
+                logger.info("  Saved feature matrix to %s", config.NODE_FEATURES_PATH)
+
+                logger.info("\n  Feature Distribution Statistics:")
+                logger.info("  %s", "-" * 70)
+                stat_cols = ["in_degree", "out_degree", "total_degree",
+                             "clustering_coefficient", "pagerank", "betweenness_centrality"]
+                for col in stat_cols:
+                    stats = features_df[col].describe()
+                    logger.info(
+                        "  %-25s  mean=%.4f  std=%.4f  min=%.4f  max=%.4f",
+                        col, stats["mean"], stats["std"], stats["min"], stats["max"]
+                    )
+                logger.info("  %s", "-" * 70)
+
+                logger.info("  ✅ Feature engineering complete: %d nodes × %d features",
+                            len(features_df), len(stat_cols))
+                return features_df
+
+            logger.warning(
+                "  C++ node mismatch (%d vs %d), using NetworkX",
+                len(cpp_nodes), len(graph_nodes)
+            )
+    except Exception as exc:
+        logger.warning("  C++ backend unavailable, using NetworkX (%s)", exc)
+
+    logger.info("  Using NetworkX features (C++ not available)")
+
     # Compute each feature set
     degree_features = compute_degree(G)
-    clustering = compute_clustering_coefficient(G)
+    clustering = compute_clustering(G)
     pagerank = compute_pagerank(G)
-    betweenness = compute_betweenness_centrality(G)
+    betweenness = compute_betweenness(G)
 
     # Assemble into DataFrame
     records = []
@@ -249,15 +318,21 @@ def compute_all_features(G):
 if __name__ == "__main__":
     import sys
     sys.path.insert(0, ".")
-    from src.data_loader import load_dataset, build_graph, set_seeds
+    from src.data_loader import load_data, build_graph, set_seeds
 
     set_seeds()
     config.ensure_dirs()
 
-    df, account_labels = load_dataset()
+    df, account_labels = load_data()
     G = build_graph(df)
-    features_df = compute_all_features(G)
+    features_df = compute_features(G)
 
     logger.info("\n✅ Feature engineering standalone test complete!")
     logger.info("  Shape: %s", features_df.shape)
     print(features_df.head(10).to_string())
+
+
+# Backward-compatible aliases.
+compute_clustering_coefficient = compute_clustering
+compute_betweenness_centrality = compute_betweenness
+compute_all_features = compute_features
