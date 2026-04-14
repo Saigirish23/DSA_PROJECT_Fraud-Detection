@@ -145,5 +145,18 @@
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 <script src="/static/charts.js"></script>
-</body>
-</html>
+<script>
+// Debug: confirm Chart.js loaded and canvases exist
+window.addEventListener('load', () => {
+  console.log('Page loaded');
+  console.log('Chart.js loaded:', typeof Chart !== 'undefined');
+  ['degreeChart','clusteringChart','pagerankChart','betweennessChart'].forEach(id => {
+    const el = document.getElementById(id);
+    console.log(`Canvas #${id}:`, el ? `found (${el.offsetWidth}x${el.offsetHeight})` : 'MISSING');
+  });
+  const histCanvas = document.getElementById('histCanvas');
+  console.log(`Canvas #histCanvas:`, histCanvas ? `found (${histCanvas.offsetWidth}x${histCanvas.offsetHeight})` : 'MISSING');
+  console.log('Page height:', document.body.scrollHeight);
+  console.log('Window height:', window.innerHeight);
+});
+</script>

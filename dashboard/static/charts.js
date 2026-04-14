@@ -8,6 +8,8 @@ async function fetchJson(url) {
   }
 }
 
+const chartRegistry = {};
+
 function num(v, fallback = 0) {
   const n = Number(v);
   return Number.isFinite(n) ? n : fallback;
@@ -40,17 +42,83 @@ function statusBadge(score) {
   return '<span class="badge safe">NORMAL</span>';
 }
 
-function renderFeatureChart(canvasId, labels, data, color, title) {
-  const ctx = document.getElementById(canvasId);
-  if (!ctx) return;
+function destroyChartIfExists(canvasId) {
+  if (chartRegistry[canvasId]) {
+    chartRegistry[canvasId].destroy();
+    chartRegistry[canvasId] = null;
+  }
+}
 
-  new Chart(ctx, {
+function buildHistogram(values, bins = 20) {
+  const clean = values.filter((v) => Number.isFinite(v));
+  if (!clean.length) {
+    return { labels: [], counts: [] };
+  }
+
+  const min = Math.min(...clean);
+  const max = Math.max(...clean);
+
+  // Handle constant-valued features gracefully.
+  if (Math.abs(max - min) < 1e-12) {
+    return {
+      labels: [min.toFixed(4)],
+      counts: [clean.length],
+    };
+  }
+
+  const width = (max - min) / bins;
+  const counts = Array.from({ length: bins }, () => 0);
+
+  for (const v of clean) {
+    const rawIdx = Math.floor((v - min) / width);
+    const idx = Math.max(0, Math.min(bins - 1, rawIdx));
+    counts[idx] += 1;
+  }
+
+  const labels = counts.map((_, i) => {
+    const left = min + i * width;
+    const right = left + width;
+    return `${left.toFixed(4)}-${right.toFixed(4)}`;
+  });
+
+  return { labels, counts };
+}
+
+function renderFeatureChart(canvasId, values, color, title) {
+  const ctx = document.getElementById(canvasId);
+  if (!ctx) {
+    console.warn(`Canvas element #${canvasId} not found`);
+    return;
+  }
+
+  destroyChartIfExists(canvasId);
+  
+  // Set canvas pixel dimensions for proper rendering
+  const width = ctx.offsetWidth || ctx.parentElement?.offsetWidth || 300;
+  const height = ctx.offsetHeight || 180;
+  ctx.width = width;
+  ctx.height = height;
+  
+  const hist = buildHistogram(values, 16);
+
+  if (!hist.labels.length) {
+    const fallbackCtx = ctx.getContext("2d");
+    fallbackCtx.fillStyle = "#4a6080";
+    fallbackCtx.font = "12px Space Mono";
+    fallbackCtx.fillText("No feature data available", 16, 24);
+    console.warn(`No histogram data for ${canvasId}`);
+    return;
+  }
+  
+  console.log(`Rendering ${canvasId}: ${values.length} values, ${hist.labels.length} bins`);
+
+  chartRegistry[canvasId] = new Chart(ctx, {
     type: "bar",
     data: {
-      labels,
+      labels: hist.labels,
       datasets: [{
         label: title,
-        data,
+        data: hist.counts,
         backgroundColor: color,
         borderColor: color,
         borderWidth: 1,
@@ -64,8 +132,16 @@ function renderFeatureChart(canvasId, labels, data, color, title) {
         title: { display: true, text: title, color: "#c8d8f0" },
       },
       scales: {
-        x: { ticks: { color: "#4a6080", maxTicksLimit: 10 }, grid: { color: "rgba(30,45,74,0.3)" } },
-        y: { ticks: { color: "#4a6080" }, grid: { color: "rgba(30,45,74,0.3)" } },
+        x: {
+          ticks: { color: "#4a6080", maxTicksLimit: 6 },
+          grid: { color: "rgba(30,45,74,0.3)" },
+          title: { display: true, text: "Value Range", color: "#4a6080" },
+        },
+        y: {
+          ticks: { color: "#4a6080" },
+          grid: { color: "rgba(30,45,74,0.3)" },
+          title: { display: true, text: "Count", color: "#4a6080" },
+        },
       },
     },
   });
@@ -75,8 +151,14 @@ function renderDonut(fraud, normal) {
   const canvas = document.getElementById("histCanvas");
   if (!canvas) return;
 
+  destroyChartIfExists("histCanvas");
+  
+  // Set canvas pixel dimensions for proper rendering
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+  
   const total = Math.max(fraud + normal, 1);
-  new Chart(canvas, {
+  chartRegistry["histCanvas"] = new Chart(canvas, {
     type: "doughnut",
     data: {
       labels: ["Fraud", "Normal"],
@@ -166,6 +248,12 @@ function renderTrainingLoss(history) {
   const fallback = document.getElementById("trainingFallback");
   if (!canvas || !fallback) return;
 
+  destroyChartIfExists("trainingLossCanvas");
+  
+  // Set canvas pixel dimensions for proper rendering
+  canvas.width = canvas.offsetWidth;
+  canvas.height = canvas.offsetHeight;
+
   if (!history || !history.length) {
     fallback.textContent = "Training data not available.";
     return;
@@ -184,7 +272,7 @@ function renderTrainingLoss(history) {
   const losses = history.map((r) => num(r[lossCol]));
   const labels = losses.map((_, i) => i + 1);
 
-  new Chart(canvas, {
+  chartRegistry["trainingLossCanvas"] = new Chart(canvas, {
     type: "line",
     data: {
       labels,
@@ -212,6 +300,7 @@ function renderTrainingLoss(history) {
 }
 
 async function initDashboard() {
+  console.log('Dashboard initialization started');
   const [metrics, features, labels, cppStatus, trainingHistory] = await Promise.all([
     fetchJson("/api/metrics"),
     fetchJson("/api/features"),
@@ -220,6 +309,14 @@ async function initDashboard() {
     fetchJson("/api/training_history"),
   ]);
 
+  console.log('API data loaded:', {
+    metrics: metrics?.length || 0,
+    features: features?.length || 0,
+    labels,
+    cppStatus,
+    trainingHistory: trainingHistory?.length || 0
+  });
+
   const featureRows = Array.isArray(features) ? features : [];
   const metricRows = Array.isArray(metrics) ? metrics : [];
   const historyRows = Array.isArray(trainingHistory) ? trainingHistory : [];
@@ -227,7 +324,8 @@ async function initDashboard() {
   const fraud = num(labels?.fraud);
   const normal = num(labels?.normal);
   const totalNodes = featureRows.length;
-  const fraudRatio = totalNodes > 0 ? ((fraud * 100) / totalNodes).toFixed(2) : "0.00";
+  const totalLabels = fraud + normal;
+  const fraudRatio = totalLabels > 0 ? ((fraud * 100) / totalLabels).toFixed(2) : "0.00";
 
   const statusEl = document.getElementById("cppStatusText");
   if (statusEl) {
@@ -293,10 +391,10 @@ async function initDashboard() {
     });
   }
 
-  renderFeatureChart("degreeChart", sample.map((r) => String(r[cols.nodeId])), sample.map((r) => num(r[cols.degree])), "rgba(255,62,91,0.75)", "Degree");
-  renderFeatureChart("clusteringChart", sample.map((r) => String(r[cols.nodeId])), sample.map((r) => num(r[cols.clustering])), "rgba(255,176,32,0.75)", "Clustering");
-  renderFeatureChart("pagerankChart", sample.map((r) => String(r[cols.nodeId])), sample.map((r) => num(r[cols.pagerank])), "rgba(0,245,160,0.75)", "PageRank");
-  renderFeatureChart("betweennessChart", sample.map((r) => String(r[cols.nodeId])), sample.map((r) => num(r[cols.betweenness])), "rgba(0,229,255,0.75)", "Betweenness");
+  renderFeatureChart("degreeChart", sample.map((r) => num(r[cols.degree])), "rgba(255,62,91,0.75)", "Degree Distribution");
+  renderFeatureChart("clusteringChart", sample.map((r) => num(r[cols.clustering])), "rgba(255,176,32,0.75)", "Clustering Distribution");
+  renderFeatureChart("pagerankChart", sample.map((r) => num(r[cols.pagerank])), "rgba(0,245,160,0.75)", "PageRank Distribution");
+  renderFeatureChart("betweennessChart", sample.map((r) => num(r[cols.betweenness])), "rgba(0,229,255,0.75)", "Betweenness Distribution");
 
   renderNodeTable(featureRows, cols, labelsByNode);
 }

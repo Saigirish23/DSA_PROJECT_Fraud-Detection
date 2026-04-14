@@ -17,12 +17,17 @@
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+html, body {
+  height: 100%;
+  max-height: 100%;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
 body {
   background: var(--bg);
   color: var(--text);
   font-family: 'Space Mono', monospace;
-  min-height: 100vh;
-  overflow-x: hidden;
 }
 
 body::before {
@@ -69,11 +74,12 @@ header {
 main {
   position: relative; z-index: 1;
   max-width: 1400px; margin: 0 auto;
-  padding: 32px 40px;
+  padding: 32px 40px 60px 40px;
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   grid-template-rows: auto auto auto;
   gap: 20px;
+  align-items: start;
 }
 
 .card {
@@ -128,10 +134,13 @@ main {
 }
 
 .graph-section canvas {
-  width: 100%; height: 380px;
+  width: 100%;
+  height: 180px !important;
+  max-height: 180px !important;
   background: var(--surface2);
   border-radius: 8px;
   border: 1px solid var(--border);
+  display: block;
 }
 
 .section-title {
@@ -213,7 +222,24 @@ main {
 
 .feat-fill { height: 100%; border-radius: 3px; }
 
-#histCanvas { width: 100%; height: 220px; }
+#histCanvas {
+  width: 100% !important;
+  height: 220px !important;
+  max-height: 220px !important;
+  display: block;
+}
+
+#trainingLossCanvas {
+  width: 100% !important;
+  height: 280px !important;
+  max-height: 280px !important;
+  display: block;
+}
+
+canvas {
+  max-width: 100% !important;
+  max-height: 100% !important;
+}
 
 .algo-chips {
   display: flex; flex-wrap: wrap; gap: 8px;
