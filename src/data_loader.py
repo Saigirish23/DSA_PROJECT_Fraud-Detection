@@ -211,11 +211,18 @@ def _adapt_elliptic_dataset(features_path, edges_path, labels_path):
     tx_df["timestamp"] = pd.Timestamp("2023-01-01")
     tx_df["transaction_id"] = ["EL_{:08d}".format(i) for i in range(len(tx_df))]
 
-    # classes: unknown=2, licit=1, illicit=0 in some versions; map illicit->1 (fraud)
+    # classes: varies by dataset version
+    # kagglehub v1: illicit=1, licit=2, unknown="unknown"->0
+    # older v2: illicit=0, licit=1, unknown=2
     labels = labels.rename(columns={"txId": "account_id", "class": "is_fraud"})
     labels["account_id"] = labels["account_id"].astype(str)
     labels["is_fraud"] = pd.to_numeric(labels["is_fraud"], errors="coerce").fillna(0).astype(int)
-    labels["is_fraud"] = labels["is_fraud"].map({0: 1, 1: 0, 2: 0}).fillna(0).astype(int)
+    # Detect format: if has value 1 with count ~4.5k, it's v1 (kagglehub); else v2
+    is_fraud_counts = labels["is_fraud"].value_counts()
+    if 1 in is_fraud_counts and is_fraud_counts[1] < 10000:  # v1: ~4.5k illicit
+        labels["is_fraud"] = labels["is_fraud"].map({1: 1, 2: 0, 0: 0}).fillna(0).astype(int)
+    else:  # v2: 0=illicit, 1=licit, 2=unknown
+        labels["is_fraud"] = labels["is_fraud"].map({0: 1, 1: 0, 2: 0}).fillna(0).astype(int)
     gt_df = labels[["account_id", "is_fraud"]].copy()
 
     return tx_df, gt_df
