@@ -1,130 +1,155 @@
-# Fraud Detection in Transaction Graphs using GNNs and Graph Heuristics
+# Fraud Detection in Transaction Graphs (Elliptic + Dynamic Features)
 
-A hybrid machine learning pipeline that combines classical graph algorithms (DSA) with Graph Neural Networks (GNNs) for identifying fraudulent accounts in financial transaction networks.
+This repository implements an end-to-end fraud detection pipeline that combines:
 
-## Problem Statement
+- graph-based heuristics,
+- Graph Neural Networks (PyTorch Geometric),
+- and hybrid fusion strategies.
 
-Existing fraud detection models assume static graphs, but real transaction 
-networks evolve continuously. Recomputing graph features from scratch is 
-expensive and impractical in real-time systems:
+It now supports the Elliptic Bitcoin dataset and a true incremental dynamic feature pipeline.
 
-- Full degree recomputation:    O(V+E)   per update
-- Full PageRank recomputation:  O(k·(V+E)) per update  
-- Full clustering recomputation: O(V·d²) per update
+## What Is Current In This Repo
 
-### Novel Contribution: Dynamic Graph Data Structures
+- Primary dataset path is Elliptic when raw Elliptic CSVs are available.
+- Dynamic pipeline is enabled with:
+  - `python main.py --dynamic`
+- Training is capped to a maximum of 100 epochs in `src/train.py`.
+- Dashboard reads the latest artifacts from `data/processed` and `outputs/results`.
 
-This project introduces a dynamic graph layer that maintains features 
-**incrementally** as new transactions arrive:
+## Pipeline Overview
 
-| Component | Structure | Complexity |
-|---|---|---|
-| Degree tracking | Incremental adjacency list | O(1) per edge |
-| Amount aggregation | Fenwick tree (BIT) | O(log n) update/query |
-| Recent activity | Sliding window + deque | O(1) expiry |
-| PageRank | Local neighborhood update | O(k·deg) per edge |
-| Clustering | Triangle counting on insert | O(d) per edge |
+1. Load dataset (Elliptic or canonical fallback) and build directed transaction graph.
+2. Feature engineering:
+     - static path (`python main.py`) or
+     - incremental dynamic path (`python main.py --dynamic`).
+3. Heuristic fraud scoring + pseudo labels.
+4. PyG data preparation and train/val/test split.
+5. GNN training.
+6. Evaluation and hybrid comparisons:
+     - Heuristic only
+     - GNN only
+     - Hybrid Strategy A (early fusion)
+     - Hybrid Strategy B (late fusion)
 
-**Key innovation:** Real-time fraud detection without rebuilding the graph.
-Complexity reduced from O(V+E) per update → O(1) or O(log n) incremental updates.
+## Quick Start
 
-## Architecture
+### Requirements
 
-```text
-               [ Raw Transaction CSV ]
-                         |
-                         v
-             (Phase 2: Graph Builder)
-            [ NetworkX DiGraph (V, E) ]
-                         |
-                         v
-      (Phase 3: Dynamic Graph Layer - Optional)
- [ Incremental Adj | Fenwick BIT | Window | Local PR ]
-                         |
-           +-------------+-------------+
-           |                           |
-           v                           v
- (Static Features Path)        (Dynamic Features Path)
- O(V+E) / O(V·d²) / ...        O(1) / O(log n) incremental
-           |                           |
-           +-------------+-------------+
-                         |
-                         v
-                (Phase 4: Heuristics)
-               [ Rule-Based Scorer ]
-                         |
-                         v
-                (Phase 5: PyG Data Prep)
-               [ Normalized Tensors ]
-                         |
-                         v
-                (Phase 6: GNN Training)
-                 [ FraudGCN Model ]
-                         |
-                         v
-                (Phase 7: Hybrid Fusion)
-         [ α · GCN_Prob + (1-α) · Heuristic ]
-                         |
-                         v
-                (Phase 8: Evaluation)
-           [ Metrics, ROC Curves, Visuals ]
-```
+- Python 3.10+
+- CUDA-capable GPU recommended (runs on CPU as well)
 
-## Dataset Description
+### Install
 
-The project uses a synthetic but highly realistic dataset mimicking financial fraud patterns:
-- **Accounts (Nodes):** ~500 total, ~10% fraudulent.
-- **Transactions (Edges):** ~2,000 transactions over 30 days.
-- **Node Features:** Purely structural (computed from the graph connectivity).
-- **Patterns:** Fraud accounts exhibit bursty transaction patterns, higher median amounts (lognormal), and connections to other fraudulent accounts (fraud rings).
-
-## Getting Started
-
-### Prerequisites
-- Python >= 3.10
-- GPU recommended (with CUDA 13.0) but fully functional on CPU
-
-### Installation
-
-1. Clone the repository and navigate into it.
-2. Install the pinned dependencies:
 ```bash
 pip install -r requirements.txt
 ```
-*(Note: PyTorch Geometric dependencies are sensitive to CUDA versions. The `requirements.txt` assumes PyTorch 2.11 + cu130).*
 
-### Running the Pipeline
+### Run
 
-To run the pipeline end-to-end (Phases 2 through 8):
+- Static features:
 
 ```bash
 python main.py
 ```
 
-This will automatically:
-1. Generate synthetic data.
-2. Compute structural network features.
-3. Apply heuristic labeling.
-4. Train the GCN model.
-5. Search for the optimal late-fusion blend ($\alpha$).
-6. Generate visualizations in `outputs/plots/` and `outputs/results/`.
+- Dynamic incremental features:
 
-## Results Summary
+```bash
+python main.py --dynamic
+```
 
-Comparison of the different modeling strategies evaluated on unseen test nodes:
+### Launch Dashboard
 
-| Model | Accuracy | Precision | Recall | F1 Score |
-| :--- | :--- | :--- | :--- | :--- |
-| **Heuristic Baseline** | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
-| **GNN Only** | 0.8300 | 0.4583 | 0.7333 | 0.5641 |
-| **Hybrid (Strategy A)** | 0.8000 | 0.4074 | 0.7333 | 0.5238 |
-| **Hybrid (Strategy B, α=0.5)** | 0.8400 | 0.4828 | 0.9333 | 0.6364 |
+```bash
+python dashboard/dashboard_server.py
+```
 
-*Note: Strategy A concatenates the heuristic score as a GNN input feature. Strategy B takes a weighted average of model outputs. In our tests, late fusion (Strategy B) consistently outperforms both pure GNN and early fusion (Strategy A), approaching the oracle performance of the heuristic score (which acts as ground truth for training here).*
+Then open: http://localhost:5000
 
-## Key Design Decisions & Trade-offs
+## Current Result Snapshot (from outputs/results/final_metrics.csv)
 
-1. **Class-Weighted NLLLoss:** Fraud is severely imbalanced (10-15%). Without applying inverse-frequency weighting, the GNN rapidly collapsed to predicting 'normal' for all accounts to achieve 85% accuracy.
-2. **PyG vs. DGL:** Selected PyTorch Geometric for its straightforward message passing interface and better compatibility with standard networkx inputs.
-3. **Directed Graph Formulation:** Transaction graphs are directed. The semantic difference between money-in vs. money-out is massive.
-4. **Heuristic as Ground-Truth Substitute:** In many real-world scenarios, labeled fraud data is scarce. Bootstrapping labels with domain-expert heuristics allowed us to train the GNN, which then learned continuous structural embeddings that smoothed out rigid heuristic rules.
+| Model | Accuracy | Precision | Fraud Recall | F1 |
+|---|---:|---:|---:|---:|
+| Heuristic Only | 0.771459 | 0.023810 | 0.075472 | 0.036199 |
+| GNN Only | 0.780758 | 0.116230 | 0.432390 | 0.183211 |
+| Hybrid (Strategy A, early fusion) | 0.796779 | 0.168837 | 0.275660 | 0.209412 |
+| Hybrid (Strategy B, late fusion) | 0.778970 | 0.115900 | 0.435535 | 0.183080 |
+
+Best values from this run:
+
+- Best F1: Hybrid Strategy A (0.209412)
+- Best Fraud Recall: Hybrid Strategy B (0.435535)
+- Best Accuracy: Hybrid Strategy A (0.796779)
+
+## Repository Structure (Current)
+
+```text
+dsa_project/
+|-- config.py
+|-- main.py
+|-- README.md
+|-- requirements.txt
+|-- train_elliptic.py
+|
+|-- cpp/
+|   |-- Makefile
+|   |-- graph_algorithms.cpp
+|   |-- graph_algorithms.h
+|   `-- graph_runner.py
+|
+|-- dashboard/
+|   |-- dashboard.html
+|   |-- dashboard_server.py
+|   `-- static/
+|       |-- charts.js
+|       `-- style.css
+|
+|-- data/
+|   |-- raw/
+|   |   |-- account_ground_truth.csv
+|   |   |-- transactions.csv
+|   |   |-- elliptic_features.csv
+|   |   |-- elliptic_edges.csv
+|   |   |-- elliptic_labels.csv
+|   |   `-- bitcoin/
+|   |-- processed/
+|   |   |-- node_features.csv
+|   |   |-- node_features_full.csv
+|   |   `-- labels.csv
+|   `-- external/
+|       `-- pyg_elliptic/
+|
+|-- models/
+|   `-- best_gcn.pt
+|
+|-- outputs/
+|   |-- plots/
+|   `-- results/
+|       |-- final_metrics.csv
+|       |-- model_comparison.csv
+|       |-- alpha_sweep_results.csv
+|       |-- node_predictions.csv
+|       `-- training_history.csv
+|
+`-- src/
+      |-- data_loader.py
+      |-- dynamic_graph.py
+      |-- features.py
+      |-- heuristics.py
+      |-- gnn_model.py
+      |-- train.py
+      |-- evaluate.py
+      |-- hybrid.py
+      |-- bitcoin_loader.py
+      |-- bitcoin_model.py
+      |-- bitcoin_train.py
+      |-- bitcoin_train_tuned.py
+      |-- elliptic_loader.py
+      `-- hparam_sweep.py
+```
+
+## Notes
+
+- `data/external/` is ignored for GitHub push safety (large artifacts).
+- Regeneratable artifacts are written to `data/processed/` and `outputs/results/`.
+- If the dashboard fails to start because port 5000 is busy, stop the existing process and restart.
