@@ -490,13 +490,14 @@ def build_pyg_data(G, features_df, labels_series=None):
     node_to_idx = {node: idx for idx, node in enumerate(nodes)}
     num_nodes = len(nodes)
 
-    canonical_feature_cols = ["degree", "in_degree", "out_degree", "clustering", "pagerank"]
+    canonical_feature_cols = ["degree", "in_degree", "out_degree", "clustering", "pagerank", "recent_transaction_sum"]
     full_feature_priority = [
         "degree",
         "in_degree",
         "out_degree",
         "clustering",
         "pagerank",
+        "recent_transaction_sum",
         "tx_count_window",
         "amount_std_window",
         "unique_peers_window",
@@ -514,6 +515,7 @@ def build_pyg_data(G, features_df, labels_series=None):
         "out_degree": ["out_degree"],
         "clustering": ["clustering", "clustering_coefficient"],
         "pagerank": ["pagerank", "page_rank"],
+        "recent_transaction_sum": ["recent_transaction_sum"],
     }
 
     resolved_columns = {}

@@ -15,24 +15,73 @@ function num(v, fallback = 0) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+function pickFirstColumn(keys, candidates, fallback = null) {
+  for (const name of candidates) {
+    if (keys.includes(name)) return name;
+  }
+  return fallback;
+}
+
 function pickFeatureColumns(sample) {
   if (!sample) {
     return {
-      degree: "total_degree",
-      clustering: "clustering_coefficient",
+      degree: "degree",
+      inDegree: "in_degree",
+      outDegree: "out_degree",
+      clustering: "clustering",
       pagerank: "pagerank",
-      betweenness: "betweenness_centrality",
+      betweenness: "betweenness",
+      recentTx: "recent_transaction_sum",
       nodeId: "node_id",
     };
   }
 
   const keys = Object.keys(sample);
   return {
-    degree: keys.includes("total_degree") ? "total_degree" : "degree",
-    clustering: keys.includes("clustering_coefficient") ? "clustering_coefficient" : "clustering",
-    pagerank: keys.includes("pagerank") ? "pagerank" : "page_rank",
-    betweenness: keys.includes("betweenness_centrality") ? "betweenness_centrality" : "betweenness",
-    nodeId: keys.includes("node_id") ? "node_id" : keys[0],
+    degree: pickFirstColumn(keys, ["degree", "total_degree"], "degree"),
+    inDegree: pickFirstColumn(keys, ["in_degree"], null),
+    outDegree: pickFirstColumn(keys, ["out_degree"], null),
+    clustering: pickFirstColumn(keys, ["clustering", "clustering_coefficient"], "clustering"),
+    pagerank: pickFirstColumn(keys, ["pagerank", "page_rank"], "pagerank"),
+    betweenness: pickFirstColumn(keys, ["betweenness", "betweenness_centrality"], null),
+    recentTx: pickFirstColumn(keys, ["recent_transaction_sum", "tx_count_window"], null),
+    nodeId: pickFirstColumn(keys, ["node_id", "account_id"], keys[0] || "node_id"),
+  };
+}
+
+function pickAuxFeature(cols) {
+  if (cols.recentTx) {
+    return {
+      key: cols.recentTx,
+      label: cols.recentTx === "recent_transaction_sum" ? "Recent Tx Sum" : "Tx Count Window",
+      format: cols.recentTx === "recent_transaction_sum" ? "amount" : "count",
+      color: "rgba(159,255,84,0.75)",
+    };
+  }
+
+  if (cols.betweenness) {
+    return {
+      key: cols.betweenness,
+      label: "Betweenness",
+      format: "score",
+      color: "rgba(0,229,255,0.75)",
+    };
+  }
+
+  if (cols.outDegree) {
+    return {
+      key: cols.outDegree,
+      label: "Out Degree",
+      format: "count",
+      color: "rgba(0,229,255,0.75)",
+    };
+  }
+
+  return {
+    key: cols.degree,
+    label: "Degree",
+    format: "count",
+    color: "rgba(0,229,255,0.75)",
   };
 }
 
@@ -40,6 +89,38 @@ function statusBadge(score) {
   if (score >= 0.55) return '<span class="badge fraud">FRAUD</span>';
   if (score >= 0.45) return '<span class="badge warn">SUSPICIOUS</span>';
   return '<span class="badge safe">NORMAL</span>';
+}
+
+function setNodeTableHeaders(auxFeature) {
+  const auxHeader = document.getElementById("auxFeatureHeader");
+  if (auxHeader) {
+    auxHeader.textContent = auxFeature?.label || "Aux Feature";
+  }
+
+  const auxLegend = document.getElementById("auxLegendLabel");
+  if (auxLegend) {
+    auxLegend.textContent = auxFeature?.label || "Aux Feature";
+  }
+}
+
+function formatAuxValue(value, fmt) {
+  if (fmt === "count") return num(value).toFixed(0);
+  if (fmt === "amount") return num(value).toFixed(2);
+  return num(value).toFixed(6);
+}
+
+function computeNodeRiskScore(nodeId, labelsMap, predictionMap) {
+  const label = labelsMap.get(nodeId);
+  if (Number.isFinite(label) && label >= 0) {
+    return label >= 0.5 ? 0.7 : 0.2;
+  }
+
+  const predictedProb = predictionMap.get(nodeId);
+  if (Number.isFinite(predictedProb)) {
+    return predictedProb;
+  }
+
+  return 0.2;
 }
 
 function destroyChartIfExists(canvasId) {
@@ -58,7 +139,6 @@ function buildHistogram(values, bins = 20) {
   const min = Math.min(...clean);
   const max = Math.max(...clean);
 
-  // Handle constant-valued features gracefully.
   if (Math.abs(max - min) < 1e-12) {
     return {
       labels: [min.toFixed(4)],
@@ -92,13 +172,12 @@ function renderFeatureChart(canvasId, values, color, title) {
   }
 
   destroyChartIfExists(canvasId);
-  
-  // Set canvas pixel dimensions for proper rendering
+
   const width = ctx.offsetWidth || ctx.parentElement?.offsetWidth || 300;
   const height = ctx.offsetHeight || 180;
   ctx.width = width;
   ctx.height = height;
-  
+
   const hist = buildHistogram(values, 16);
 
   if (!hist.labels.length) {
@@ -106,11 +185,8 @@ function renderFeatureChart(canvasId, values, color, title) {
     fallbackCtx.fillStyle = "#4a6080";
     fallbackCtx.font = "12px Space Mono";
     fallbackCtx.fillText("No feature data available", 16, 24);
-    console.warn(`No histogram data for ${canvasId}`);
     return;
   }
-  
-  console.log(`Rendering ${canvasId}: ${values.length} values, ${hist.labels.length} bins`);
 
   chartRegistry[canvasId] = new Chart(ctx, {
     type: "bar",
@@ -152,13 +228,11 @@ function renderDonut(fraud, normal) {
   if (!canvas) return;
 
   destroyChartIfExists("histCanvas");
-  
-  // Set canvas pixel dimensions for proper rendering
   canvas.width = canvas.offsetWidth;
   canvas.height = canvas.offsetHeight;
-  
+
   const total = Math.max(fraud + normal, 1);
-  chartRegistry["histCanvas"] = new Chart(canvas, {
+  chartRegistry.histCanvas = new Chart(canvas, {
     type: "doughnut",
     data: {
       labels: ["Fraud", "Normal"],
@@ -203,6 +277,7 @@ function renderModelTable(metrics) {
     if (Math.abs(num(m.f1) - bestF1) < 1e-12) {
       tr.style.background = "rgba(0,245,160,0.12)";
     }
+
     tr.innerHTML = `
       <td>${m.Model ?? m.model ?? "-"}</td>
       <td>${num(m.accuracy).toFixed(4)}</td>
@@ -215,28 +290,36 @@ function renderModelTable(metrics) {
   });
 }
 
-function renderNodeTable(features, cols, labelsMap) {
+function renderNodeTable(features, cols, labelsMap, predictionMap, auxFeature) {
   const tbody = document.getElementById("nodeTableBody");
   if (!tbody) return;
   tbody.innerHTML = "";
 
   if (!features || !features.length) {
-    tbody.innerHTML = '<tr><td colspan="6">No node features available.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8">No node features available.</td></tr>';
     return;
   }
 
-  const sorted = [...features].sort((a, b) => num(b[cols.degree]) - num(a[cols.degree])).slice(0, 25);
+  const auxKey = auxFeature?.key || cols.degree;
+  const sorted = [...features]
+    .sort((a, b) => num(b[cols.degree]) - num(a[cols.degree]))
+    .slice(0, 25);
+
   sorted.forEach((n) => {
     const nodeId = String(n[cols.nodeId]);
-    const label = labelsMap.get(nodeId) ?? 0;
-    const score = label ? 0.7 : 0.2;
+    const inDegreeVal = cols.inDegree ? num(n[cols.inDegree]) : 0;
+    const outDegreeVal = cols.outDegree ? num(n[cols.outDegree]) : 0;
+    const score = computeNodeRiskScore(nodeId, labelsMap, predictionMap);
+
     const tr = document.createElement("tr");
     tr.innerHTML = `
       <td style="font-family:'Space Mono';color:#fff">${nodeId}</td>
       <td>${num(n[cols.degree]).toFixed(0)}</td>
+      <td>${inDegreeVal.toFixed(0)}</td>
+      <td>${outDegreeVal.toFixed(0)}</td>
       <td>${num(n[cols.clustering]).toFixed(4)}</td>
       <td>${num(n[cols.pagerank]).toFixed(6)}</td>
-      <td>${num(n[cols.betweenness]).toFixed(6)}</td>
+      <td>${formatAuxValue(n[auxKey], auxFeature?.format || "score")}</td>
       <td>${statusBadge(score)}</td>
     `;
     tbody.appendChild(tr);
@@ -249,8 +332,6 @@ function renderTrainingLoss(history) {
   if (!canvas || !fallback) return;
 
   destroyChartIfExists("trainingLossCanvas");
-  
-  // Set canvas pixel dimensions for proper rendering
   canvas.width = canvas.offsetWidth;
   canvas.height = canvas.offsetHeight;
 
@@ -272,7 +353,7 @@ function renderTrainingLoss(history) {
   const losses = history.map((r) => num(r[lossCol]));
   const labels = losses.map((_, i) => i + 1);
 
-  chartRegistry["trainingLossCanvas"] = new Chart(canvas, {
+  chartRegistry.trainingLossCanvas = new Chart(canvas, {
     type: "line",
     data: {
       labels,
@@ -290,8 +371,16 @@ function renderTrainingLoss(history) {
       maintainAspectRatio: false,
       plugins: { legend: { labels: { color: "#c8d8f0" } } },
       scales: {
-        x: { title: { display: true, text: "Epoch", color: "#4a6080" }, ticks: { color: "#4a6080" }, grid: { color: "rgba(30,45,74,0.3)" } },
-        y: { title: { display: true, text: "Loss", color: "#4a6080" }, ticks: { color: "#4a6080" }, grid: { color: "rgba(30,45,74,0.3)" } },
+        x: {
+          title: { display: true, text: "Epoch", color: "#4a6080" },
+          ticks: { color: "#4a6080" },
+          grid: { color: "rgba(30,45,74,0.3)" },
+        },
+        y: {
+          title: { display: true, text: "Loss", color: "#4a6080" },
+          ticks: { color: "#4a6080" },
+          grid: { color: "rgba(30,45,74,0.3)" },
+        },
       },
     },
   });
@@ -300,10 +389,6 @@ function renderTrainingLoss(history) {
 }
 
 function renderMetricsKPI(metrics) {
-  const tbody = document.getElementById("metricsKPIBody");
-  if (!tbody) return;
-  tbody.innerHTML = "";
-
   if (!metrics || !metrics.length) {
     return;
   }
@@ -325,11 +410,17 @@ function renderMetricsKPI(metrics) {
 
   const metricsContainer = document.getElementById("metricsContainer");
   if (!metricsContainer) return;
-  
+
   metricsContainer.innerHTML = kpis.map((kpi) => {
     const value = metricDict[kpi.key] ?? 0;
-    const formatted = (kpi.format === ".2%" ? (value * 100).toFixed(1) + "%" : 
-                      kpi.format === ".4f" ? value.toFixed(4) : value.toFixed(2));
+    const formatted = (
+      kpi.format === ".2%"
+        ? `${(value * 100).toFixed(1)}%`
+        : kpi.format === ".4f"
+          ? value.toFixed(4)
+          : value.toFixed(2)
+    );
+
     return `
       <div class="card metric-kpi">
         <div class="card-label">${kpi.label}</div>
@@ -355,15 +446,17 @@ function renderTopRiskyNodes(predictions) {
 
   sorted.forEach((p, idx) => {
     const tr = document.createElement("tr");
-    const fraud_prob = num(p.fraud_probability);
-    const badge = fraud_prob >= 0.6 ? '<span class="badge fraud">HIGH RISK</span>' : 
-                  fraud_prob >= 0.4 ? '<span class="badge warn">MEDIUM</span>' : 
-                  '<span class="badge safe">LOW</span>';
-    
+    const fraudProb = num(p.fraud_probability);
+    const badge = fraudProb >= 0.6
+      ? '<span class="badge fraud">HIGH RISK</span>'
+      : fraudProb >= 0.4
+        ? '<span class="badge warn">MEDIUM</span>'
+        : '<span class="badge safe">LOW</span>';
+
     tr.innerHTML = `
       <td>${idx + 1}</td>
-      <td style="font-family:'Space Mono';color:#fff">${String(p.node_id || '-')}</td>
-      <td>${(fraud_prob * 100).toFixed(2)}%</td>
+      <td style="font-family:'Space Mono';color:#fff">${String(p.node_id || "-")}</td>
+      <td>${(fraudProb * 100).toFixed(2)}%</td>
       <td>${badge}</td>
     `;
     tbody.appendChild(tr);
@@ -371,31 +464,22 @@ function renderTopRiskyNodes(predictions) {
 }
 
 async function initDashboard() {
-  console.log('Dashboard initialization started');
-  const [metrics, features, labels, cppStatus, trainingHistory, predictions, graphStats] = await Promise.all([
+  const [metrics, features, labels, cppStatus, trainingHistory, predictions, graphStats, featureMetadata] = await Promise.all([
     fetchJson("/api/metrics"),
-    fetchJson("/api/features"),
+    fetchJson("/api/features?limit=1200"),
     fetchJson("/api/labels"),
     fetchJson("/api/cpp_status"),
     fetchJson("/api/training_history"),
     fetchJson("/api/predictions"),
     fetchJson("/api/graph_stats"),
+    fetchJson("/api/feature_metadata"),
   ]);
-
-  console.log('API data loaded:', {
-    metrics: metrics?.length || 0,
-    features: features?.length || 0,
-    labels,
-    cppStatus,
-    trainingHistory: trainingHistory?.length || 0,
-    predictions: predictions?.length || 0,
-    graphStats,
-  });
 
   const featureRows = Array.isArray(features) ? features : [];
   const metricRows = Array.isArray(metrics) ? metrics : [];
   const historyRows = Array.isArray(trainingHistory) ? trainingHistory : [];
   const predictionRows = Array.isArray(predictions) ? predictions : [];
+  const metadata = featureMetadata && typeof featureMetadata === "object" ? featureMetadata : {};
 
   const fraud = num(labels?.fraud);
   const normal = num(labels?.normal);
@@ -408,6 +492,21 @@ async function initDashboard() {
     statusEl.textContent = cppStatus?.available ? "C++ Backend: Active" : "C++ Backend: Not Compiled";
   }
 
+  const inferredDynamic = featureRows.length > 0 && Object.prototype.hasOwnProperty.call(featureRows[0], "recent_transaction_sum");
+  const isDynamic = metadata.mode === "dynamic" || inferredDynamic;
+
+  const modeEl = document.getElementById("pipelineModeText");
+  if (modeEl) {
+    modeEl.textContent = isDynamic ? "Pipeline: Dynamic" : "Pipeline: Static";
+  }
+
+  const titleEl = document.getElementById("suspiciousSectionTitle");
+  if (titleEl) {
+    titleEl.textContent = isDynamic
+      ? "Top Suspicious Nodes — Dynamic + Structural Signals"
+      : "Top Suspicious Nodes — Structural Signals";
+  }
+
   const totalNodesEl = document.getElementById("totalNodes");
   const fraudCountEl = document.getElementById("fraudCount");
   const ratioEl = document.getElementById("cycleCount");
@@ -417,17 +516,24 @@ async function initDashboard() {
   if (ratioEl) ratioEl.textContent = `${fraudRatio}%`;
 
   let bestF1 = 0;
-  metricRows.forEach((m) => { bestF1 = Math.max(bestF1, num(m.f1)); });
+  metricRows.forEach((m) => {
+    bestF1 = Math.max(bestF1, num(m.f1));
+  });
   if (bestF1El) bestF1El.textContent = bestF1 ? bestF1.toFixed(3) : "—";
 
   const alert = document.getElementById("alertText");
   if (alert) {
+    const modeText = isDynamic ? "Dynamic pipeline active" : "Static pipeline active";
     if (metricRows.length) {
-      const f1Val = metricRows.find(m => m.metric === "f1");
-      const f1Score = f1Val ? num(f1Val.value).toFixed(3) : "N/A";
-      alert.innerHTML = `<strong>GNN Model Trained</strong> — F1 Score: ${f1Score} | Risky nodes detected: ${predictionRows.length}`;
+      const f1MetricRow = metricRows.find((m) => m.metric === "f1");
+      const f1Score = f1MetricRow
+        ? num(f1MetricRow.value).toFixed(3)
+        : bestF1
+          ? bestF1.toFixed(3)
+          : "N/A";
+      alert.innerHTML = `<strong>${modeText}</strong> — F1 Score: ${f1Score} | Risky nodes detected: ${predictionRows.length}`;
     } else {
-      alert.innerHTML = "<strong>No metric files found</strong> — Run the Python pipeline to generate dashboard data.";
+      alert.innerHTML = `<strong>${modeText}</strong> — No metric files found. Run the Python pipeline to generate dashboard data.`;
     }
   }
 
@@ -438,6 +544,7 @@ async function initDashboard() {
   renderTopRiskyNodes(predictionRows);
 
   if (!featureRows.length) {
+    setNodeTableHeaders({ label: "Aux Feature" });
     ["degreeChart", "clusteringChart", "pagerankChart", "betweennessChart"].forEach((id) => {
       const el = document.getElementById(id);
       if (el) {
@@ -447,35 +554,50 @@ async function initDashboard() {
         ctx.fillText("No feature data available", 16, 24);
       }
     });
-    renderNodeTable([], pickFeatureColumns(null), new Map());
+    renderNodeTable([], pickFeatureColumns(null), new Map(), new Map(), { key: "degree", label: "Aux Feature", format: "count" });
     return;
   }
 
   const cols = pickFeatureColumns(featureRows[0]);
+  const auxFeature = pickAuxFeature(cols);
   const sample = featureRows.slice(0, 30);
   const labelsByNode = new Map();
+  const predictionByNode = new Map();
 
-  if (Array.isArray(features)) {
-    const labelColCandidates = ["heuristic_label", "label", "is_fraud"];
-    featureRows.forEach((r) => {
-      const nodeId = String(r[cols.nodeId]);
-      let l = null;
-      for (const c of labelColCandidates) {
-        if (Object.prototype.hasOwnProperty.call(r, c)) {
-          l = num(r[c]);
-          break;
-        }
+  setNodeTableHeaders(auxFeature);
+
+  predictionRows.forEach((p) => {
+    const nodeId = String(p.node_id ?? "");
+    if (!nodeId) return;
+    predictionByNode.set(nodeId, num(p.fraud_probability, NaN));
+  });
+
+  const labelColCandidates = ["heuristic_label", "label", "is_fraud"];
+  featureRows.forEach((r) => {
+    const nodeId = String(r[cols.nodeId]);
+    let labelValue = null;
+    for (const c of labelColCandidates) {
+      if (Object.prototype.hasOwnProperty.call(r, c)) {
+        labelValue = num(r[c], NaN);
+        break;
       }
-      if (l !== null) labelsByNode.set(nodeId, l);
-    });
-  }
+    }
+    if (Number.isFinite(labelValue)) {
+      labelsByNode.set(nodeId, labelValue);
+    }
+  });
 
   renderFeatureChart("degreeChart", sample.map((r) => num(r[cols.degree])), "rgba(255,62,91,0.75)", "Degree Distribution");
   renderFeatureChart("clusteringChart", sample.map((r) => num(r[cols.clustering])), "rgba(255,176,32,0.75)", "Clustering Distribution");
   renderFeatureChart("pagerankChart", sample.map((r) => num(r[cols.pagerank])), "rgba(0,245,160,0.75)", "PageRank Distribution");
-  renderFeatureChart("betweennessChart", sample.map((r) => num(r[cols.betweenness])), "rgba(0,229,255,0.75)", "Betweenness Distribution");
+  renderFeatureChart(
+    "betweennessChart",
+    sample.map((r) => num(r[auxFeature.key])),
+    auxFeature.color,
+    `${auxFeature.label} Distribution`
+  );
 
-  renderNodeTable(featureRows, cols, labelsByNode);
+  renderNodeTable(featureRows, cols, labelsByNode, predictionByNode, auxFeature);
 }
 
 document.querySelectorAll(".algo-chip").forEach((chip) => {

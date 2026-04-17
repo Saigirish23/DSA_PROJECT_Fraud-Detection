@@ -16,7 +16,7 @@ logger = config.setup_logging(__name__)
 HYPERPARAMS = {
     "lr": 0.0003,
     "weight_decay": 1e-4,
-    "epochs": 400,
+    "epochs": 100,
     "hidden_dim": 128,
     "heads": 4,
     "dropout": 0.35,
@@ -231,7 +231,7 @@ def train_model(data, device="cpu"):
         weight_decay=HYPERPARAMS["weight_decay"],
     )
 
-    total_epochs = int(HYPERPARAMS["epochs"])
+    total_epochs = min(int(HYPERPARAMS["epochs"]), 100)
     warmup_epochs = int(HYPERPARAMS["warmup_epochs"])
 
     def lr_lambda(epoch_idx):

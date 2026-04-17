@@ -19,6 +19,10 @@
       <div class="status-dot"></div>
       <span id="cppStatusText">C++ Backend: Checking...</span>
     </div>
+    <div class="status-badge">
+      <div class="status-dot"></div>
+      <span id="pipelineModeText">Pipeline: Detecting...</span>
+    </div>
   </div>
 </header>
 
@@ -70,7 +74,7 @@
       <div class="legend-item"><div class="legend-dot" style="background:var(--fraud)"></div> Degree</div>
       <div class="legend-item"><div class="legend-dot" style="background:var(--warn)"></div> Clustering</div>
       <div class="legend-item"><div class="legend-dot" style="background:var(--safe)"></div> PageRank</div>
-      <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div> Betweenness</div>
+      <div class="legend-item"><div class="legend-dot" style="background:var(--accent)"></div><span id="auxLegendLabel">Aux Feature</span></div>
     </div>
     <div class="algo-chips" id="algoChips">
       <div class="algo-chip active">Degree</div>
@@ -119,16 +123,18 @@
   </div>
 
   <div class="card table-section">
-    <div class="section-title">Top Suspicious Nodes — Ranked by Heuristic Score</div>
+    <div class="section-title" id="suspiciousSectionTitle">Top Suspicious Nodes — Dynamic + Structural Signals</div>
     <div style="overflow-x:auto">
       <table class="score-table">
         <thead>
           <tr>
             <th>Node ID</th>
             <th>Total Degree</th>
+            <th>In Degree</th>
+            <th>Out Degree</th>
             <th>Clustering</th>
             <th>PageRank</th>
-            <th>Betweenness</th>
+            <th id="auxFeatureHeader">Aux Feature</th>
             <th>Status</th>
           </tr>
         </thead>

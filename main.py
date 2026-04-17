@@ -1,6 +1,7 @@
 
 import argparse
 import os
+import time
 
 import numpy as np
 import pandas as pd
@@ -22,7 +23,7 @@ def _parse_args():
     parser.add_argument(
         "--dynamic",
         action="store_true",
-        help="Use dynamic snapshot-stacked feature pipeline instead of static features",
+        help="Use true incremental dynamic pipeline instead of static features",
     )
     parser.add_argument(
         "--bitcoin",
@@ -45,6 +46,24 @@ def _parse_args():
 
 
 def _build_dynamic_snapshot_features(df, window_days=7, snapshot_stride=5000):
+    """
+    Phase 7: True incremental dynamic feature pipeline.
+
+    This function processes transactions ONE BY ONE through the DynamicFraudGraph.
+    NO global recomputation (no nx.pagerank, no nx.clustering) is ever called.
+
+    Flow:
+        1. Sort transactions by time
+        2. For each transaction: incrementally update the dynamic graph
+        3. Every `snapshot_stride` transactions: snapshot features (pure lookup)
+        4. Aggregate snapshots into final feature matrix
+
+    All features are maintained incrementally inside DynamicFraudGraph:
+        - degree:       O(1) per update
+        - clustering:   O(min(deg(u), deg(v))) per update — triangle counting
+        - pagerank:     O(k × avg_deg) per update — local relaxation
+        - recent_tx_sum: O(log n) per update — Fenwick tree
+    """
     required_cols = {"sender_id", "receiver_id"}
     if not required_cols.issubset(df.columns):
         raise ValueError(
@@ -76,7 +95,17 @@ def _build_dynamic_snapshot_features(df, window_days=7, snapshot_stride=5000):
 
     snapshots = []
     total = len(work)
+
+    t_start = time.time()
+
     for i, row in enumerate(work.itertuples(index=False), start=1):
+        # Phase 7: Each transaction is processed incrementally.
+        # Inside add_transaction:
+        #   - degree updated: O(1)
+        #   - triangles/clustering updated: O(min(deg(u), deg(v)))
+        #   - PageRank locally relaxed: O(k × avg_deg)
+        #   - Fenwick tree updated: O(log n)
+        #   - Expired edges removed: O(1) amortized
         dg.add_transaction(
             sender=getattr(row, "sender_id"),
             receiver=getattr(row, "receiver_id"),
@@ -85,11 +114,14 @@ def _build_dynamic_snapshot_features(df, window_days=7, snapshot_stride=5000):
         )
 
         if i % stride == 0 or i == total:
-            dg.calculate_snapshot_pagerank()
+            # Snapshot: pure lookup, NO recomputation triggered
             snap = dg.get_all_features()
             if not snap.empty:
                 snap["snapshot_index"] = len(snapshots)
                 snapshots.append(snap)
+
+    t_elapsed = time.time() - t_start
+    logger.info("  Dynamic incremental processing: %.2f seconds for %d transactions", t_elapsed, total)
 
     if not snapshots:
         return pd.DataFrame(columns=["node_id"] + CANONICAL_FEATURE_COLUMNS)
@@ -130,7 +162,8 @@ def main():
 
     logger.info("\n>>> PHASE 3: Feature Engineering")
     if args.dynamic:
-        logger.info("Using dynamic snapshot-stacked features (--dynamic)")
+        logger.info("Using TRUE INCREMENTAL dynamic features (--dynamic)")
+        logger.info("  No NetworkX recomputation — all features maintained incrementally")
         features_df = _build_dynamic_snapshot_features(
             df,
             window_days=args.dynamic_window_days,

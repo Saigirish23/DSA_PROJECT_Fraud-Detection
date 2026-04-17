@@ -12,7 +12,7 @@ import config
 logger = config.setup_logging(__name__)
 
 
-CANONICAL_FEATURE_COLUMNS = ["degree", "in_degree", "out_degree", "clustering", "pagerank"]
+CANONICAL_FEATURE_COLUMNS = ["degree", "in_degree", "out_degree", "clustering", "pagerank", "recent_transaction_sum"]
 FULL_FEATURE_COLUMNS = [
     "degree",
     "in_degree",
@@ -109,6 +109,7 @@ def _compute_base_features_cpp_or_nx(G):
                             "out_degree": out_deg,
                             "clustering": float(cpp_result.at[n, "clustering"]),
                             "pagerank": float(cpp_result.at[n, "pagerank"]),
+                            "recent_transaction_sum": 0.0,
                         }
                     )
             else:
@@ -132,6 +133,7 @@ def _compute_base_features_cpp_or_nx(G):
                     "out_degree": float(degree_features[node]["out_degree"]),
                     "clustering": float(clustering.get(node, 0.0)),
                     "pagerank": float(pagerank.get(node, 0.0)),
+                    "recent_transaction_sum": 0.0,
                 }
             )
 

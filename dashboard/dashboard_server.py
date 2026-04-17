@@ -7,6 +7,11 @@ import logging
 app = Flask(__name__, static_folder="static")
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+FEATURES_PATH = os.path.join(BASE, "data", "processed", "node_features.csv")
+LABELS_PATH = os.path.join(BASE, "data", "processed", "labels.csv")
+METRICS_PATH = os.path.join(BASE, "outputs", "results", "final_metrics.csv")
+PREDICTIONS_PATH = os.path.join(BASE, "outputs", "results", "node_predictions.csv")
+
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s : %(message)s')
 logger = logging.getLogger(__name__)
@@ -22,22 +27,101 @@ def load_json_safe(path):
 
 @app.route("/api/metrics")
 def get_metrics():
-    path = os.path.join(BASE, "outputs", "results", "final_metrics.csv")
-    return jsonify(load_json_safe(path))
+    return jsonify(load_json_safe(METRICS_PATH))
 
 
 @app.route("/api/features")
 def get_features():
-    path = os.path.join(BASE, "data", "processed", "node_features.csv")
-    data = load_json_safe(path)
-    return jsonify(data[:200])
+    limit = request.args.get("limit", default=500, type=int)
+    if limit is None:
+        limit = 500
+    limit = max(1, min(int(limit), 5000))
+
+    data = load_json_safe(FEATURES_PATH)
+    return jsonify(data[:limit])
+
+
+@app.route("/api/feature_metadata")
+def get_feature_metadata():
+    if not os.path.exists(FEATURES_PATH):
+        return jsonify(
+            {
+                "available": False,
+                "mode": "unknown",
+                "feature_columns": [],
+                "row_count": 0,
+                "has_recent_transaction_sum": False,
+                "has_betweenness": False,
+                "has_in_out_degree": False,
+                "recent_transaction_sum_stats": {"min": 0.0, "max": 0.0, "mean": 0.0},
+                "top_recent_transactions": [],
+            }
+        )
+
+    try:
+        df = pd.read_csv(FEATURES_PATH)
+    except Exception as e:
+        logger.warning("Failed to read feature metadata from %s: %s", FEATURES_PATH, str(e))
+        return jsonify(
+            {
+                "available": False,
+                "mode": "unknown",
+                "feature_columns": [],
+                "row_count": 0,
+                "has_recent_transaction_sum": False,
+                "has_betweenness": False,
+                "has_in_out_degree": False,
+                "recent_transaction_sum_stats": {"min": 0.0, "max": 0.0, "mean": 0.0},
+                "top_recent_transactions": [],
+            }
+        )
+
+    columns = [str(c) for c in df.columns]
+    has_recent_tx = "recent_transaction_sum" in columns
+    has_betweenness = "betweenness" in columns or "betweenness_centrality" in columns
+    has_in_out_degree = "in_degree" in columns and "out_degree" in columns
+    mode = "dynamic" if has_recent_tx else "static"
+
+    recent_stats = {"min": 0.0, "max": 0.0, "mean": 0.0}
+    top_recent = []
+    if has_recent_tx and "node_id" in df.columns:
+        tx_df = df[["node_id", "recent_transaction_sum"]].copy()
+        tx_df["node_id"] = tx_df["node_id"].astype(str)
+        tx_df["recent_transaction_sum"] = pd.to_numeric(
+            tx_df["recent_transaction_sum"], errors="coerce"
+        ).fillna(0.0)
+
+        if not tx_df.empty:
+            recent_stats = {
+                "min": float(tx_df["recent_transaction_sum"].min()),
+                "max": float(tx_df["recent_transaction_sum"].max()),
+                "mean": float(tx_df["recent_transaction_sum"].mean()),
+            }
+            top_recent = (
+                tx_df.sort_values("recent_transaction_sum", ascending=False)
+                .head(10)
+                .to_dict(orient="records")
+            )
+
+    return jsonify(
+        {
+            "available": True,
+            "mode": mode,
+            "feature_columns": columns,
+            "row_count": int(len(df)),
+            "has_recent_transaction_sum": bool(has_recent_tx),
+            "has_betweenness": bool(has_betweenness),
+            "has_in_out_degree": bool(has_in_out_degree),
+            "recent_transaction_sum_stats": recent_stats,
+            "top_recent_transactions": top_recent,
+        }
+    )
 
 
 @app.route("/api/labels")
 def get_labels():
-    path = os.path.join(BASE, "data", "processed", "labels.csv")
     try:
-        df = pd.read_csv(path)
+        df = pd.read_csv(LABELS_PATH)
         candidates = [c for c in df.columns if "fraud" in c.lower() or "label" in c.lower()]
         if not candidates:
             return jsonify({"fraud": 0, "normal": 0})
@@ -52,15 +136,14 @@ def get_labels():
 
 @app.route("/api/predictions")
 def get_predictions():
-    path = os.path.join(BASE, "outputs", "results", "node_predictions.csv")
     try:
-        df = pd.read_csv(path)
+        df = pd.read_csv(PREDICTIONS_PATH)
         df_sorted = df.sort_values('fraud_probability', ascending=False).head(100)
         records = df_sorted.to_dict(orient="records")
-        logger.info("Loaded %d predictions from %s", len(records), path)
+        logger.info("Loaded %d predictions from %s", len(records), PREDICTIONS_PATH)
         return jsonify(records)
     except Exception as e:
-        logger.warning("Failed to load predictions from %s: %s", path, str(e))
+        logger.warning("Failed to load predictions from %s: %s", PREDICTIONS_PATH, str(e))
         return jsonify([])
 
 
