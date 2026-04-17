@@ -30,6 +30,7 @@ data/processed/*.csv
 
 # Raw data
 data/raw/*.csv
+data/external/
 
 # Archive folder
 _archive/
