@@ -20,6 +20,13 @@ models/*.pth
 # Generated outputs (regeneratable)
 outputs/plots/*.png
 outputs/results/*.csv
+outputs/results/*.log
+
+# Generated processed artifacts (regeneratable)
+data/processed/*.csv
+
+# Runtime logs
+*.log
 
 # Raw data
 data/raw/*.csv
