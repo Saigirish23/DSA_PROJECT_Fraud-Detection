@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.env
+venv/
+.venv/
+
+# C++ build artifacts
+cpp/graph_algorithms
+cpp/*.o
+
+# Model checkpoints
+models/*.pt
+models/*.pth
+
+# Generated outputs (regeneratable)
+outputs/plots/*.png
+outputs/results/*.csv
+outputs/results/*.log
+
+# Generated processed artifacts (regeneratable)
+data/processed/*.csv
+
+# Runtime logs
+*.log
+
+# Raw data
+data/raw/*.csv
+
+# Archive folder
+_archive/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
