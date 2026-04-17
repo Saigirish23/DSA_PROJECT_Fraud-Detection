@@ -299,14 +299,87 @@ function renderTrainingLoss(history) {
   fallback.textContent = "";
 }
 
+function renderMetricsKPI(metrics) {
+  const tbody = document.getElementById("metricsKPIBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  if (!metrics || !metrics.length) {
+    return;
+  }
+
+  const metricDict = {};
+  metrics.forEach((m) => {
+    if (m.metric && m.value) {
+      metricDict[m.metric] = num(m.value);
+    }
+  });
+
+  const kpis = [
+    { label: "Accuracy", key: "accuracy", format: ".2%" },
+    { label: "Precision", key: "precision", format: ".2%" },
+    { label: "Recall", key: "recall", format: ".2%" },
+    { label: "F1-Score", key: "f1", format: ".4f" },
+    { label: "ROC-AUC", key: "roc_auc", format: ".4f" },
+  ];
+
+  const metricsContainer = document.getElementById("metricsContainer");
+  if (!metricsContainer) return;
+  
+  metricsContainer.innerHTML = kpis.map((kpi) => {
+    const value = metricDict[kpi.key] ?? 0;
+    const formatted = (kpi.format === ".2%" ? (value * 100).toFixed(1) + "%" : 
+                      kpi.format === ".4f" ? value.toFixed(4) : value.toFixed(2));
+    return `
+      <div class="card metric-kpi">
+        <div class="card-label">${kpi.label}</div>
+        <div class="card-value">${formatted}</div>
+      </div>
+    `;
+  }).join("");
+}
+
+function renderTopRiskyNodes(predictions) {
+  const tbody = document.getElementById("riskyNodesTableBody");
+  if (!tbody) return;
+  tbody.innerHTML = "";
+
+  if (!predictions || !predictions.length) {
+    tbody.innerHTML = '<tr><td colspan="4">No prediction data available.</td></tr>';
+    return;
+  }
+
+  const sorted = [...predictions]
+    .sort((a, b) => num(b.fraud_probability) - num(a.fraud_probability))
+    .slice(0, 10);
+
+  sorted.forEach((p, idx) => {
+    const tr = document.createElement("tr");
+    const fraud_prob = num(p.fraud_probability);
+    const badge = fraud_prob >= 0.6 ? '<span class="badge fraud">HIGH RISK</span>' : 
+                  fraud_prob >= 0.4 ? '<span class="badge warn">MEDIUM</span>' : 
+                  '<span class="badge safe">LOW</span>';
+    
+    tr.innerHTML = `
+      <td>${idx + 1}</td>
+      <td style="font-family:'Space Mono';color:#fff">${String(p.node_id || '-')}</td>
+      <td>${(fraud_prob * 100).toFixed(2)}%</td>
+      <td>${badge}</td>
+    `;
+    tbody.appendChild(tr);
+  });
+}
+
 async function initDashboard() {
   console.log('Dashboard initialization started');
-  const [metrics, features, labels, cppStatus, trainingHistory] = await Promise.all([
+  const [metrics, features, labels, cppStatus, trainingHistory, predictions, graphStats] = await Promise.all([
     fetchJson("/api/metrics"),
     fetchJson("/api/features"),
     fetchJson("/api/labels"),
     fetchJson("/api/cpp_status"),
     fetchJson("/api/training_history"),
+    fetchJson("/api/predictions"),
+    fetchJson("/api/graph_stats"),
   ]);
 
   console.log('API data loaded:', {
@@ -314,16 +387,19 @@ async function initDashboard() {
     features: features?.length || 0,
     labels,
     cppStatus,
-    trainingHistory: trainingHistory?.length || 0
+    trainingHistory: trainingHistory?.length || 0,
+    predictions: predictions?.length || 0,
+    graphStats,
   });
 
   const featureRows = Array.isArray(features) ? features : [];
   const metricRows = Array.isArray(metrics) ? metrics : [];
   const historyRows = Array.isArray(trainingHistory) ? trainingHistory : [];
+  const predictionRows = Array.isArray(predictions) ? predictions : [];
 
   const fraud = num(labels?.fraud);
   const normal = num(labels?.normal);
-  const totalNodes = featureRows.length;
+  const totalNodes = graphStats?.nodes || featureRows.length;
   const totalLabels = fraud + normal;
   const fraudRatio = totalLabels > 0 ? ((fraud * 100) / totalLabels).toFixed(2) : "0.00";
 
@@ -347,8 +423,9 @@ async function initDashboard() {
   const alert = document.getElementById("alertText");
   if (alert) {
     if (metricRows.length) {
-      const best = metricRows.reduce((acc, cur) => (num(cur.f1) > num(acc.f1) ? cur : acc), metricRows[0]);
-      alert.innerHTML = `<strong>${fraud} suspicious nodes detected</strong> — Best model: ${best.Model ?? best.model ?? "N/A"} with F1 ${(num(best.f1)).toFixed(3)}`;
+      const f1Val = metricRows.find(m => m.metric === "f1");
+      const f1Score = f1Val ? num(f1Val.value).toFixed(3) : "N/A";
+      alert.innerHTML = `<strong>GNN Model Trained</strong> — F1 Score: ${f1Score} | Risky nodes detected: ${predictionRows.length}`;
     } else {
       alert.innerHTML = "<strong>No metric files found</strong> — Run the Python pipeline to generate dashboard data.";
     }
@@ -357,6 +434,8 @@ async function initDashboard() {
   renderDonut(fraud, normal);
   renderModelTable(metricRows);
   renderTrainingLoss(historyRows);
+  renderMetricsKPI(metricRows);
+  renderTopRiskyNodes(predictionRows);
 
   if (!featureRows.length) {
     ["degreeChart", "clusteringChart", "pagerankChart", "betweennessChart"].forEach((id) => {

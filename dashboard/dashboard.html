@@ -54,6 +54,10 @@
     </div>
   </div>
 
+  <div class="card" id="metricsContainer" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px">
+    <!-- Metrics KPI cards will be inserted here -->
+  </div>
+
   <div class="card graph-section">
     <div class="section-title">Node Feature Distributions</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -94,6 +98,23 @@
           <div style="margin-top:6px;color:var(--muted)">Consumes engineered features, trains GNN models, and performs hybrid evaluation and metric reporting.</div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <div class="card table-section">
+    <div class="section-title">Top 10 Risky Nodes — GNN Fraud Probability</div>
+    <div style="overflow-x:auto">
+      <table class="score-table">
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Node ID</th>
+            <th>Fraud Probability</th>
+            <th>Risk Level</th>
+          </tr>
+        </thead>
+        <tbody id="riskyNodesTableBody"></tbody>
+      </table>
     </div>
   </div>
 
