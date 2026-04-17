@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-Quick training script for Elliptic Bitcoin dataset with progress tracking.
-Exports all required artifacts for dashboard integration.
-"""
 import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -17,10 +13,8 @@ from src.train import train_model, get_gnn_predictions
 from sklearn.metrics import accuracy_score, f1_score, roc_auc_score, confusion_matrix, precision_score, recall_score
 
 def export_artifacts(model, history, data, device, node_to_idx):
-    """Export training artifacts for dashboard integration."""
     config.ensure_dirs()
     
-    # Export training history
     history_df = pd.DataFrame({
         'epoch': list(range(1, len(history['train_loss']) + 1)),
         'train_loss': history['train_loss'],
@@ -34,7 +28,6 @@ def export_artifacts(model, history, data, device, node_to_idx):
     history_df.to_csv(history_path, index=False)
     print(f"      ✓ Training history exported to {history_path}")
     
-    # Get final metrics
     preds, probs = get_gnn_predictions(model, data, device)
     labeled_mask = (data.y >= 0).cpu().numpy()
     test_mask = data.test_mask.cpu().numpy() & labeled_mask
@@ -55,7 +48,6 @@ def export_artifacts(model, history, data, device, node_to_idx):
     cm = confusion_matrix(test_y, test_pred)
     tn, fp, fn, tp = cm.ravel() if cm.size == 4 else (0, 0, 0, 0)
     
-    # Export final metrics
     metrics_df = pd.DataFrame({
         'metric': ['accuracy', 'precision', 'recall', 'f1', 'roc_auc', 'true_negatives', 'false_positives', 'false_negatives', 'true_positives'],
         'value': [acc, prec, rec, f1, auc, tn, fp, fn, tp],
@@ -64,7 +56,6 @@ def export_artifacts(model, history, data, device, node_to_idx):
     metrics_df.to_csv(metrics_path, index=False)
     print(f"      ✓ Final metrics exported to {metrics_path}")
     
-    # Export node-level predictions
     idx_to_node = {v: k for k, v in node_to_idx.items()}
     all_y = data.y.cpu().numpy()
     all_pred = preds.numpy()
@@ -92,7 +83,6 @@ def main():
     print("  ELLIPTIC BITCOIN DATASET - GCN TRAINING")
     print("="*70)
 
-    # Load data
     print("\n[1/5] Loading Elliptic Bitcoin dataset...")
     df, account_labels = load_data()
     print(f"      ✓ Loaded {len(df)} transactions")
@@ -126,7 +116,6 @@ def main():
     print("  TRAINING COMPLETE - EXPORTING ARTIFACTS")
     print("="*70)
 
-    # Export artifacts
     print("\n[6/5] Exporting training artifacts...")
     acc, prec, rec, f1, auc, tn, fp, fn, tp = export_artifacts(model, history, data, device, node_to_idx)
 

@@ -1,4 +1,3 @@
-"""Train the FraudGCN model on the Elliptic Bitcoin dataset."""
 
 import os
 
@@ -20,7 +19,6 @@ from src.gnn_model import FraudGCN
 
 
 def train_on_bitcoin():
-    """Train FraudGCN on Elliptic Bitcoin dataset and report metrics."""
     print("\n" + "=" * 55)
     print("  Bitcoin Dataset — FraudGCN Training")
     print("=" * 55)

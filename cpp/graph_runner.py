@@ -1,4 +1,3 @@
-"""Python bridge to the C++ graph algorithm binary."""
 
 import os
 import subprocess
@@ -11,12 +10,6 @@ BINARY = os.path.join(CPP_DIR, "graph_algorithms")
 
 
 def run_cpp_algorithms(edge_file_path):
-    """
-    Run the compiled C++ binary on the edge file.
-    Returns a DataFrame indexed by node_id with columns:
-    degree, clustering, pagerank, betweenness
-    Returns None if binary is unavailable or execution fails.
-    """
     if not os.path.exists(BINARY):
         print("  [C++ backend] Binary not found, falling back to NetworkX")
         return None

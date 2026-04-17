@@ -1,4 +1,3 @@
-"""Flask server for the fraud detection dashboard."""
 
 import os
 import pandas as pd
@@ -8,13 +7,11 @@ import logging
 app = Flask(__name__, static_folder="static")
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
-#logger = __import__("config").setup_logging(__name__)
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(name)s : %(message)s')
 logger = logging.getLogger(__name__)
 
 def load_json_safe(path):
-    """Load a CSV and return records; return empty list on failure."""
     try:
         df = pd.read_csv(path)
         return df.to_dict(orient="records")
@@ -55,11 +52,9 @@ def get_labels():
 
 @app.route("/api/predictions")
 def get_predictions():
-    """Get node-level predictions from training output."""
     path = os.path.join(BASE, "outputs", "results", "node_predictions.csv")
     try:
         df = pd.read_csv(path)
-        # Sort by fraud_probability descending and return top 100
         df_sorted = df.sort_values('fraud_probability', ascending=False).head(100)
         records = df_sorted.to_dict(orient="records")
         logger.info("Loaded %d predictions from %s", len(records), path)
@@ -71,9 +66,7 @@ def get_predictions():
 
 @app.route("/api/graph_stats")
 def get_graph_stats():
-    """Get graph statistics (nodes, edges, density, avg_degree)."""
     try:
-        # Try to load transaction data and build graph stats
         tx_path = os.path.join(BASE, "data", "raw", "transactions.csv")
         if not os.path.exists(tx_path):
             logger.warning("Transactions file not found at %s", tx_path)
@@ -81,7 +74,6 @@ def get_graph_stats():
         
         df = pd.read_csv(tx_path)
         
-        # Build graph from transactions
         G = nx.DiGraph()
         if "sender_id" in df.columns and "receiver_id" in df.columns:
             for _, row in df.iterrows():
@@ -127,7 +119,6 @@ def get_training_history():
     if source == "default":
         return jsonify(load_json_safe(default_path))
 
-    # Auto mode: prefer tuned Elliptic history when available.
     if os.path.exists(tuned_path):
         tuned_data = load_json_safe(tuned_path)
         if tuned_data:

@@ -1,4 +1,3 @@
-"""Training loop for AML graph models."""
 
 import copy
 
@@ -34,7 +33,6 @@ HYPERPARAMS = {
 
 
 class AsymmetricFocalLoss(nn.Module):
-    """Asymmetric focal loss for imbalanced fraud classification."""
 
     def __init__(self, gamma_pos=1.0, gamma_neg=4.0, clip=0.05, eps=1e-8):
         super().__init__()
@@ -195,7 +193,6 @@ def _collect_probs(model, data_cpu, eval_nodes, device, threshold, batch_size, n
 
 
 def train_model(data, device="cpu"):
-    """Train AMLDetector with asymmetric focal loss and validation-driven thresholding."""
     config.ensure_dirs()
 
     resolved_device = _resolve_device(device)
@@ -406,7 +403,6 @@ def train_model(data, device="cpu"):
 
 
 def get_gnn_predictions(model, data, device="cpu"):
-    """Get class predictions and class probabilities for all nodes."""
     resolved_device = _resolve_device(device)
     model = model.to(resolved_device)
     model.eval()

@@ -1,4 +1,3 @@
-"""Pipeline orchestrator with CLI support for static/dynamic and Bitcoin runs."""
 
 import argparse
 import os
@@ -46,7 +45,6 @@ def _parse_args():
 
 
 def _build_dynamic_snapshot_features(df, window_days=7, snapshot_stride=5000):
-    """Compute dynamic features by stacking periodic snapshots over transaction stream."""
     required_cols = {"sender_id", "receiver_id"}
     if not required_cols.issubset(df.columns):
         raise ValueError(
@@ -107,7 +105,6 @@ def _build_dynamic_snapshot_features(df, window_days=7, snapshot_stride=5000):
 
 
 def main():
-    """Run the entire fraud detection pipeline."""
     args = _parse_args()
 
     if args.bitcoin:
@@ -121,19 +118,16 @@ def main():
     logger.info("FRAUD DETECTION IN TRANSACTION GRAPHS (END-TO-END)")
     logger.info("=" * 60)
 
-    # Phase 1: Configuration & Setup
     config.ensure_dirs()
     set_seeds()
     
     device = "cuda" if torch.cuda.is_available() else "cpu"
     logger.info("Running on device: %s", device)
 
-    # Phase 2: Data Loading & Graph Construction
     logger.info("\n>>> PHASE 2: Data Loading & Graph Construction")
     df, account_labels = load_dataset()
     G = build_graph(df)
 
-    # Phase 3: Feature Engineering (DSA Core)
     logger.info("\n>>> PHASE 3: Feature Engineering")
     if args.dynamic:
         logger.info("Using dynamic snapshot-stacked features (--dynamic)")
@@ -156,20 +150,16 @@ def main():
         logger.info("Using static feature pipeline (default)")
         features_df = compute_all_features(G)
 
-    # Phase 4: Heuristic Fraud Detection
     logger.info("\n>>> PHASE 4: Rule-based Heuristics")
     scored_df = compute_fraud_scores(features_df)
     labels_df = generate_heuristic_labels(scored_df)
 
-    # Phase 5: PyTorch Geometric Data Prep
     logger.info("\n>>> PHASE 5: PyG Data Preparation")
     data, scaler, node_to_idx = build_pyg_data(G, features_df)
 
-    # Phase 6: GNN Model Training
     logger.info("\n>>> PHASE 6: GNN Model Training")
     model, history = train_model(data, device)
 
-    # Phase 7 & 8: Hybrid Model and Full Evaluation
     logger.info("\n>>> PHASE 7 & 8: Evaluation & Hybrid Model")
     comparison_df = run_full_evaluation(
         G, features_df, labels_df, data, model, history, account_labels, device, node_to_idx=node_to_idx
@@ -184,8 +174,6 @@ def main():
     logger.info("  - %s (Metrics & Results)", config.RESULTS_DIR)
     logger.info("  - %s (Trained Models)", config.MODELS_DIR)
 
-    # Phase bonus: save training history for dashboard
-    # (only if history dict exists from train())
     if history:
         history_series = {}
         max_len = 0

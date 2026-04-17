@@ -1,4 +1,3 @@
-"""Loader for full-feature Elliptic Bitcoin dataset (tuned workflow only)."""
 
 import os
 
@@ -12,24 +11,6 @@ import config
 
 
 def load_elliptic_full():
-    """
-    Load full Elliptic dataset with all available numeric node features.
-
-    Layout:
-      - col 0: txId
-      - col 1: time_step
-      - remaining cols: node features
-
-    Label mapping:
-      - illicit -> 1
-      - licit -> 0
-      - unknown/unlabeled -> -1
-
-    Split protocol (time-based):
-      - train: t <= 27
-      - val:   28 <= t <= 34
-      - test:  t >= 35
-    """
     raw = os.path.join(config.RAW_DATA_DIR, "bitcoin")
 
     feat_path = os.path.join(raw, "elliptic_txs_features.csv")
@@ -43,7 +24,6 @@ def load_elliptic_full():
     if feat_df.shape[1] < 3:
         raise ValueError("Elliptic feature matrix is malformed: expected at least 3 columns")
 
-    # Name columns: txId, time_step, f_0..f_k
     feature_dim = feat_df.shape[1] - 2
     feat_df.columns = ["txId", "time_step"] + [f"f_{i}" for i in range(feature_dim)]
 
@@ -57,7 +37,6 @@ def load_elliptic_full():
     tx_idx = {tid: i for i, tid in enumerate(tx_ids)}
     n_nodes = len(tx_ids)
 
-    # Use all 166 numeric features available in Elliptic file (time_step + f_*).
     feat_cols = ["time_step"] + [f"f_{i}" for i in range(feature_dim)]
     x_np = df[feat_cols].values.astype(np.float32)
 
@@ -89,8 +68,6 @@ def load_elliptic_full():
     src_ids = edges_df.iloc[:, 0].astype(str).values
     dst_ids = edges_df.iloc[:, 1].astype(str).values
 
-    # Build edge attributes: [normalized_amount, temporal_delta_normalized, direction_flag].
-    # Elliptic edge list has no explicit amount, so amount channel is 0 after normalization.
     edge_pairs = []
     edge_attr_rows = []
 
@@ -113,11 +90,9 @@ def load_elliptic_full():
       di = tx_idx[d]
       dt_norm = abs(float(node_time[si] - node_time[di])) / max_delta
 
-      # forward edge
       edge_pairs.append([si, di])
       edge_attr_rows.append([0.0, dt_norm, 1.0])
 
-      # reverse edge
       edge_pairs.append([di, si])
       edge_attr_rows.append([0.0, dt_norm, 0.0])
 

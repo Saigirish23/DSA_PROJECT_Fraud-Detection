@@ -1,4 +1,3 @@
-"""Dynamic graph data structures for snapshot-based feature computation."""
 
 from collections import defaultdict, deque
 
@@ -10,35 +9,24 @@ CANONICAL_FEATURE_COLUMNS = ["degree", "in_degree", "out_degree", "clustering", 
 
 
 class DynamicFraudGraph:
-    """
-    Dynamic graph with O(1) per-edge structural updates.
-
-    Edge updates only maintain window structure and degree counters.
-    Snapshot math (PageRank + clustering) is computed once per snapshot.
-    """
 
     def __init__(self, window_size=7):
         self.window = int(window_size)
         self.active_graph = nx.DiGraph()
 
-        # Multiplicity map avoids repeated-edge expiry bugs in sliding windows.
-        self.edge_counts = defaultdict(int)  # (u, v) -> multiplicity
+        self.edge_counts = defaultdict(int)  # yahan duplicate edge count track hota hai
 
-        # O(1) degree lookups for feature extraction.
         self.in_degree = defaultdict(int)
         self.out_degree = defaultdict(int)
 
-        # Transaction history for expiry: (timestamp, u, v)
         self.history = deque()
         self.current_time = None
 
-        # Snapshot-level metrics (recomputed lazily or explicitly).
         self.current_pagerank = {}
         self.current_clustering = {}
         self._snapshot_dirty = True
 
     def _increment_edge(self, u, v):
-        """Add one edge copy; update topology and degrees only on first copy."""
         key = (u, v)
         prev = self.edge_counts[key]
         self.edge_counts[key] = prev + 1
@@ -49,7 +37,6 @@ class DynamicFraudGraph:
             self.in_degree[v] += 1
 
     def _decrement_edge(self, u, v):
-        """Remove one edge copy; update topology and degrees when last copy expires."""
         key = (u, v)
         count = self.edge_counts.get(key, 0)
         if count <= 0:
@@ -71,7 +58,6 @@ class DynamicFraudGraph:
                 if self.in_degree[v] == 0:
                     del self.in_degree[v]
 
-            # Trim isolated nodes to keep snapshot computations compact.
             if self.active_graph.has_node(u):
                 if self.active_graph.in_degree(u) == 0 and self.active_graph.out_degree(u) == 0:
                     self.active_graph.remove_node(u)
@@ -88,8 +74,7 @@ class DynamicFraudGraph:
             self._decrement_edge(u, v)
 
     def add_transaction(self, sender, receiver, amount, timestamp):
-        """O(1) structural update for one transaction event."""
-        del amount  # Amount is not needed for structural snapshot features.
+        del amount  # amount yahan use nahi ho raha, sirf graph structure update karna hai
 
         u = str(sender)
         v = str(receiver)
@@ -106,14 +91,12 @@ class DynamicFraudGraph:
         self._snapshot_dirty = True
 
     def remove_transaction(self, sender, receiver):
-        """Explicit structural edge removal by one transaction copy."""
         u = str(sender)
         v = str(receiver)
         self._decrement_edge(u, v)
         self._snapshot_dirty = True
 
     def calculate_snapshot_pagerank(self):
-        """Compute snapshot metrics once from current active window graph."""
         if self.active_graph.number_of_nodes() == 0:
             self.current_pagerank = {}
             self.current_clustering = {}
@@ -123,7 +106,6 @@ class DynamicFraudGraph:
         try:
             self.current_pagerank = nx.pagerank(self.active_graph, alpha=0.85)
         except Exception:
-            # Safe fallback if power iteration fails.
             n = self.active_graph.number_of_nodes()
             uniform = 1.0 / float(n) if n else 0.0
             self.current_pagerank = {node: uniform for node in self.active_graph.nodes()}
@@ -152,7 +134,6 @@ class DynamicFraudGraph:
         }
 
     def get_all_features(self):
-        # Safety net for direct callers that did not invoke snapshot compute explicitly.
         if self._snapshot_dirty:
             self.calculate_snapshot_pagerank()
 

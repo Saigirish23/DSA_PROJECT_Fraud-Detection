@@ -1,10 +1,4 @@
-/*
- * ============================================================
- *  Fraud Detection in Transaction Graphs — DSA Core (C++)
- *  Algorithms: Degree, Clustering Coefficient, PageRank,
- *              Betweenness Centrality
- * ============================================================
- */
+
 
 #include "graph_algorithms.h"
 
@@ -98,7 +92,7 @@ bool read_edge_list(const string& edge_file,
     return true;
 }
 
-}  // namespace
+}  
 
 unordered_map<string, int> compute_degree(
     const vector<pair<string, string>>& edges,
@@ -343,9 +337,9 @@ int main(int argc, char* argv[]) {
     }
 }
 
-// ── Fenwick Tree (BIT) ────────────────────────────────────────────────────
-// O(log n) point update and prefix query
-// Used for temporal transaction amount aggregation
+
+
+
 struct FenwickTree {
     int n;
     vector<double> tree;
@@ -369,8 +363,8 @@ struct FenwickTree {
     }
 };
 
-// ── Incremental Degree Tracker ────────────────────────────────────────────
-// O(1) per update vs O(V+E) full rebuild
+
+
 struct IncrementalDegree {
     unordered_map<string, int> in_deg, out_deg;
 
@@ -384,8 +378,8 @@ struct IncrementalDegree {
     }
 };
 
-// ── Sliding Window ────────────────────────────────────────────────────────
-// Maintains active edges within [t - W, t]
+
+
 struct SlidingWindow {
     int window_size;
     deque<tuple<int, string, string>> history;

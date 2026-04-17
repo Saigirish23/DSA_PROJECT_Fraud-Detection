@@ -1,20 +1,3 @@
-"""
-hybrid.py — Heuristic + GNN Combination Logic
-
-Implements two hybrid strategies for combining heuristic fraud scores
-with GNN predictions:
-
-Strategy A — Feature Augmentation:
-    Adds the heuristic fraud score as an additional input feature to the GNN.
-    The GNN then learns to use both structural features AND the heuristic score.
-
-Strategy B — Late Fusion (Ensemble):
-    Combines GNN probability with heuristic score using a weighted average:
-        final_score = α × GNN_probability + (1 - α) × heuristic_score
-    Sweeps α from 0 to 1 to find the optimal blending weight.
-
-Both strategies are compared against the standalone heuristic and GNN baselines.
-"""
 
 import numpy as np
 import pandas as pd
@@ -30,7 +13,6 @@ logger = config.setup_logging(__name__)
 
 
 def _safe_roc_auc(y_true, y_prob):
-    """Compute ROC-AUC safely for potentially single-class slices."""
     y_true = np.asarray(y_true)
     y_prob = np.asarray(y_prob)
     if len(np.unique(y_true)) < 2:
@@ -39,7 +21,6 @@ def _safe_roc_auc(y_true, y_prob):
 
 
 def _safe_pr_auc(y_true, y_prob):
-    """Compute PR-AUC safely for potentially single-class slices."""
     y_true = np.asarray(y_true)
     y_prob = np.asarray(y_prob)
     if len(np.unique(y_true)) < 2:
@@ -48,7 +29,6 @@ def _safe_pr_auc(y_true, y_prob):
 
 
 def _verify_labels_are_ground_truth(data):
-    """Guardrail against evaluating against heuristic-derived labels."""
     y = data.y.detach().cpu().numpy()
     y = y[y != -1]
     fraud_ratio = float(y.mean()) if len(y) else 0.0
@@ -60,24 +40,6 @@ def _verify_labels_are_ground_truth(data):
 
 
 def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores, device="cpu"):
-    """
-    Strategy A: Add heuristic fraud score as an extra input feature to the GNN.
-
-    Rationale:
-        The GNN receives the heuristic score as prior knowledge. If the heuristic
-        is informative, the GNN can learn to amplify it. If not, it can learn to
-        downweight it. This is strictly more powerful than either alone.
-
-    Args:
-        G (nx.DiGraph): Transaction graph.
-        features_df (pd.DataFrame): Node features with 'node_id' column.
-        labels_series (pd.Series): Node labels indexed by node_id.
-        fraud_scores (pd.Series): Heuristic fraud scores indexed by node_id.
-        device (str): 'cuda' or 'cpu'.
-
-    Returns:
-        tuple: (predictions, probabilities, metrics_dict, model, history)
-    """
     from torch_geometric.data import Data
     from sklearn.model_selection import train_test_split
     from src.train import train_model, get_gnn_predictions
@@ -88,12 +50,10 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
 
     set_seeds()
 
-    # Get sorted node list
     nodes = sorted(G.nodes())
     node_to_idx = {node: idx for idx, node in enumerate(nodes)}
     num_nodes = len(nodes)
 
-    # Build augmented feature matrix (original features + heuristic score)
     feature_cols = [col for col in features_df.columns if col != "node_id"]
     num_original_features = len(feature_cols)
 
@@ -107,17 +67,14 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
         if node_id in node_to_idx:
             idx = node_to_idx[node_id]
             feature_matrix[idx, :num_original_features] = [row[col] for col in feature_cols]
-            # Append heuristic fraud score as the last feature
             feature_matrix[idx, -1] = fraud_scores.get(node_id, 0.0)
 
-    # Build edge index
     edge_list = []
     for u, v in G.edges():
         if u in node_to_idx and v in node_to_idx:
             edge_list.append([node_to_idx[u], node_to_idx[v]])
     edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
 
-    # Labels
     y = torch.full((num_nodes,), -1, dtype=torch.long)
     for node_id, label in labels_series.items():
         node_key = str(node_id)
@@ -129,7 +86,6 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
     if len(labeled_idx) < 3:
         raise ValueError("Not enough labeled nodes to run Strategy A split")
 
-    # Match reference-style split: 70/30 then 80/20 on train.
     indices = labeled_idx
     stratify_targets = y.numpy()[indices]
     stratify_targets = stratify_targets if len(np.unique(stratify_targets)) > 1 else None
@@ -151,7 +107,6 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
     val_idx = train_idx[val_rel_idx]
     train_idx = train_idx[tr_rel_idx]
 
-    # Normalize all features (including heuristic score) with train-only fit.
     scaler = StandardScaler()
     train_mask_np = np.zeros(num_nodes, dtype=bool)
     train_mask_np[train_idx] = True
@@ -173,11 +128,9 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
     data = Data(x=x, edge_index=edge_index, y=y,
                 train_mask=train_mask, val_mask=val_mask, test_mask=test_mask)
 
-    # Train augmented GNN with memory-safe minibatching.
     model, history = train_model(data, device=device)
     preds, probs = get_gnn_predictions(model, data, device=device)
 
-    # Compute metrics on test set
     test_eval_mask = (data.test_mask & (data.y != -1)).cpu().numpy()
     y_true = y.cpu().numpy()[test_eval_mask]
     y_pred = preds.cpu().numpy()[test_eval_mask]
@@ -200,24 +153,6 @@ def strategy_a_feature_augmentation(G, features_df, labels_series, fraud_scores,
 
 
 def strategy_b_late_fusion(gnn_probs, heuristic_scores, labels, val_mask, test_mask):
-    """
-    Strategy B: Late Fusion — weighted average of GNN and heuristic scores.
-
-    Sweeps alpha from 0 to 1 and, for each alpha, sweeps decision threshold
-    on validation data to select the best operating point:
-        final_score = α × GNN_fraud_prob + (1 - α) × heuristic_score
-        If final_score > threshold → predict fraud
-
-    Args:
-        gnn_probs (torch.Tensor): GNN probabilities [N, 2].
-        heuristic_scores (np.ndarray or torch.Tensor): Heuristic fraud scores [N].
-        labels (torch.Tensor): Ground truth labels [N].
-        val_mask (torch.Tensor): Boolean mask for validation nodes.
-        test_mask (torch.Tensor): Boolean mask for test nodes.
-
-    Returns:
-        tuple: (best_alpha, best_threshold, best_test_metrics, all_results_df)
-    """
     logger.info("=" * 60)
     logger.info("Strategy B: Late Fusion (sweep α from 0.0 to 1.0)")
     logger.info("=" * 60)
@@ -235,10 +170,8 @@ def strategy_b_late_fusion(gnn_probs, heuristic_scores, labels, val_mask, test_m
     else:
         h_scores = np.array(heuristic_scores, dtype=np.float32)
 
-    # GNN fraud probability (class 1)
     gnn_fraud_prob = gnn_probs[:, 1].detach().cpu().numpy()
 
-    # Normalize heuristic scores to [0, 1]
     h_min, h_max = h_scores.min(), h_scores.max()
     if h_max > h_min:
         h_scores_norm = (h_scores - h_min) / (h_max - h_min)
@@ -268,7 +201,6 @@ def strategy_b_late_fusion(gnn_probs, heuristic_scores, labels, val_mask, test_m
     threshold_grid = np.arange(0.10, 0.95 + 0.001, 0.05)
 
     for alpha in alphas:
-        # Blend scores
         final_score = alpha * gnn_fraud_prob + (1 - alpha) * h_scores_norm
         val_score = final_score[eval_val_mask_np]
         test_score = final_score[eval_test_mask_np]
@@ -322,7 +254,6 @@ def strategy_b_late_fusion(gnn_probs, heuristic_scores, labels, val_mask, test_m
 
     results_df = pd.DataFrame(results)
 
-    # Select alpha + threshold by validation objective, then report test metrics.
     best_idx = results_df.sort_values(["val_f1", "val_pr_auc"], ascending=False).index[0]
     best_alpha = results_df.loc[best_idx, "alpha"]
     best_threshold = results_df.loc[best_idx, "threshold"]
@@ -341,20 +272,6 @@ def strategy_b_late_fusion(gnn_probs, heuristic_scores, labels, val_mask, test_m
 
 
 def run_hybrid_comparison(G, features_df, labels_df, data, model, device="cpu"):
-    """
-    Run both hybrid strategies and produce a comparison table.
-
-    Args:
-        G (nx.DiGraph): Transaction graph.
-        features_df (pd.DataFrame): Node features.
-        labels_df (pd.DataFrame): Labels with 'node_id', 'fraud_score', 'heuristic_label'.
-        data (torch_geometric.data.Data): PyG data object.
-        model (FraudGCN): Trained GNN model.
-        device (str): 'cuda' or 'cpu'.
-
-    Returns:
-        pd.DataFrame: Comparison table with metrics for all models.
-    """
     from src.train import get_gnn_predictions
 
     logger.info("\n" + "=" * 70)
@@ -370,7 +287,6 @@ def run_hybrid_comparison(G, features_df, labels_df, data, model, device="cpu"):
     heuristic_series = labels_df.set_index("node_id")["heuristic_label"]
     fraud_scores = labels_df.set_index("node_id")["fraud_score"]
 
-    # --- Heuristic Only ---
     labels_np = data.y.cpu().numpy()
     test_mask_np = data.test_mask.cpu().numpy()
     eval_mask_np = test_mask_np & (labels_np != -1)
@@ -381,13 +297,11 @@ def run_hybrid_comparison(G, features_df, labels_df, data, model, device="cpu"):
 
     y_true_test = labels_np[eval_mask_np]
 
-    # Build heuristic scores aligned with node ordering
     h_scores_aligned = np.zeros(len(nodes), dtype=np.float32)
     for node in nodes:
         idx = node_to_idx[node]
         h_scores_aligned[idx] = fraud_scores.get(node, 0.0)
 
-    # Heuristic predictions on test set
     h_preds_test = []
     for node in nodes:
         if node in node_to_idx:
@@ -405,7 +319,6 @@ def run_hybrid_comparison(G, features_df, labels_df, data, model, device="cpu"):
         "pr_auc": _safe_pr_auc(y_true_test, h_scores_aligned[eval_mask_np]),
     }
 
-    # --- GNN Only ---
     gnn_preds, gnn_probs = get_gnn_predictions(model, data, device)
     y_pred_gnn = gnn_preds.numpy()[eval_mask_np]
     gnn_probs_test = gnn_probs.numpy()[eval_mask_np, 1]
@@ -419,12 +332,10 @@ def run_hybrid_comparison(G, features_df, labels_df, data, model, device="cpu"):
         "pr_auc": _safe_pr_auc(y_true_test, gnn_probs_test),
     }
 
-    # --- Strategy A: Feature Augmentation ---
     _, _, strategy_a_metrics, _, _ = strategy_a_feature_augmentation(
         G, features_df, true_label_series, fraud_scores.to_dict(), device
     )
 
-    # --- Strategy B: Late Fusion ---
     best_alpha, best_threshold, strategy_b_metrics, fusion_results = strategy_b_late_fusion(
         gnn_probs,
         h_scores_aligned,
@@ -433,7 +344,6 @@ def run_hybrid_comparison(G, features_df, labels_df, data, model, device="cpu"):
         data.test_mask.cpu(),
     )
 
-    # --- Comparison Table ---
     strategy_b_test_metrics = {
         k: strategy_b_metrics[k]
         for k in ["accuracy", "precision", "recall", "f1", "roc_auc", "pr_auc"]
@@ -460,7 +370,6 @@ def run_hybrid_comparison(G, features_df, labels_df, data, model, device="cpu"):
         )
     logger.info("=" * 70)
 
-    # Save results
     config.ensure_dirs()
     comparison.to_csv(
         config.RESULTS_DIR + "/model_comparison.csv", index=False
@@ -484,7 +393,6 @@ if __name__ == "__main__":
     set_seeds()
     config.ensure_dirs()
 
-    # Full pipeline
     df, account_labels = load_dataset()
     G = build_graph(df)
     features_df = compute_all_features(G)
@@ -495,7 +403,6 @@ if __name__ == "__main__":
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model, history = train_model(data, device)
 
-    # Run hybrid comparison
     comparison, fusion_results, best_alpha = run_hybrid_comparison(
         G, features_df, labels_df, data, model, device
     )

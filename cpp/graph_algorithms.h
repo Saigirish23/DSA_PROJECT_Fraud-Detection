@@ -1,6 +1,6 @@
-// graph_algorithms.h
-// Header for graph algorithm implementations
-// Computes: degree, clustering coefficient, PageRank, betweenness centrality
+
+
+
 
 #ifndef GRAPH_ALGORITHMS_H
 #define GRAPH_ALGORITHMS_H
@@ -20,10 +20,10 @@ struct NodeFeatures {
     double betweenness;
 };
 
-// Main function — reads edge list, computes all features, prints CSV
+
 void run(const string& edge_file, int num_iterations = 100);
 
-// Individual algorithms
+
 unordered_map<string, int> compute_degree(
     const vector<pair<string, string>>& edges,
     const vector<string>& nodes);

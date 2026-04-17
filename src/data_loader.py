@@ -1,11 +1,3 @@
-"""
-data_loader.py — Data Loading & Graph Construction
-
-Responsibilities:
-  1. Normalize available raw datasets into a common schema.
-  2. Build a directed NetworkX graph from transactions.
-  3. Convert graph features + true ground-truth labels into PyG Data.
-"""
 
 import os
 import random
@@ -26,7 +18,6 @@ REQUIRED_TX_COLUMNS = ["transaction_id", "sender_id", "receiver_id", "amount", "
 
 
 def set_seeds():
-    """Set all random seeds for reproducibility."""
     random.seed(config.RANDOM_SEED)
     np.random.seed(config.RANDOM_SEED)
     torch.manual_seed(config.RANDOM_SEED)
@@ -35,7 +26,6 @@ def set_seeds():
 
 
 def generate_enhanced_synthetic_dataset():
-    """Generate enhanced synthetic fallback with account-level ground truth labels."""
     set_seeds()
     logger.info("Generating enhanced synthetic fallback dataset...")
 
@@ -50,7 +40,6 @@ def generate_enhanced_synthetic_dataset():
     normal_accounts = list(set(account_ids) - fraud_accounts)
     fraud_accounts_list = list(fraud_accounts)
     
-    # 80% of transactions involve fraud accounts (makes their degree very high)
     for i in range(n_transactions):
         if np.random.rand() < 0.8:
             sender = np.random.choice(fraud_accounts_list)
@@ -106,10 +95,8 @@ def generate_enhanced_synthetic_dataset():
 
 
 def _normalize_common_schema(tx_df, gt_df, source_name, allow_unlabeled=False):
-    """Normalize schema and persist canonical raw files."""
     df = tx_df.copy()
 
-    # Required transaction schema coercion
     rename_map = {
         "nameOrig": "sender_id",
         "nameDest": "receiver_id",
@@ -123,7 +110,6 @@ def _normalize_common_schema(tx_df, gt_df, source_name, allow_unlabeled=False):
     if "amount" not in df.columns:
         df["amount"] = 0.0
 
-    # Parse/standardize timestamp
     if np.issubdtype(df["timestamp"].dtype, np.number):
         base_ts = pd.Timestamp("2023-01-01")
         df["timestamp"] = base_ts + pd.to_timedelta(df["timestamp"].astype(int), unit="h")
@@ -141,7 +127,6 @@ def _normalize_common_schema(tx_df, gt_df, source_name, allow_unlabeled=False):
     df = df.drop_duplicates(subset=["sender_id", "receiver_id", "amount", "timestamp"])
     df = df.reset_index(drop=True)
 
-    # Ground truth schema coercion
     gdf = gt_df.copy()
     gdf = gdf.rename(columns={"node_id": "account_id", "class": "is_fraud"})
     gdf["account_id"] = gdf["account_id"].astype(str)
@@ -152,7 +137,6 @@ def _normalize_common_schema(tx_df, gt_df, source_name, allow_unlabeled=False):
         gdf["is_fraud"] = (gdf["is_fraud"] > 0).astype(int)
     gdf = gdf[["account_id", "is_fraud"]].drop_duplicates(subset=["account_id"])
 
-    # Ensure every node in transactions has a label
     tx_accounts = set(df["sender_id"]).union(set(df["receiver_id"]))
     known_accounts = set(gdf["account_id"])
     missing = sorted(tx_accounts - known_accounts)
@@ -163,7 +147,6 @@ def _normalize_common_schema(tx_df, gt_df, source_name, allow_unlabeled=False):
             ignore_index=True,
         )
 
-    # Persist canonical files
     config.ensure_dirs()
     df.to_csv(config.RAW_TRANSACTIONS_PATH, index=False)
     gdf.to_csv(config.ACCOUNT_GROUND_TRUTH_PATH, index=False)
@@ -181,7 +164,6 @@ def _normalize_common_schema(tx_df, gt_df, source_name, allow_unlabeled=False):
 
 
 def _adapt_paysim_dataset(paysim_path):
-    """Adapt PaySim transactions into canonical transaction + account label schema."""
     df = pd.read_csv(paysim_path)
     required = {"step", "nameOrig", "nameDest", "amount", "isFraud"}
     if not required.issubset(df.columns):
@@ -203,7 +185,6 @@ def _adapt_paysim_dataset(paysim_path):
 
 
 def _resolve_elliptic_sources():
-    """Return available Elliptic/Bitcoin raw file paths if present."""
     candidates = [
         {
             "name": "Elliptic",
@@ -226,7 +207,6 @@ def _resolve_elliptic_sources():
 
 
 def _read_elliptic_metadata(features_path, labels_path):
-    """Load Elliptic node metadata (txId, timestep, label) with robust mapping."""
     features = pd.read_csv(features_path, header=None)
     if features.shape[1] < 2:
         raise ValueError(f"Elliptic features file must have at least 2 columns. Found shape={features.shape}")
@@ -243,9 +223,6 @@ def _read_elliptic_metadata(features_path, labels_path):
     labels["account_id"] = labels["account_id"].astype(str)
     labels["raw_class"] = labels["raw_class"].astype(str).str.strip().str.lower()
 
-    # Common Elliptic mappings:
-    # v1: 1=illicit, 2=licit, unknown=unknown
-    # v2: 0=illicit, 1=licit, 2=unknown
     has_unknown = (labels["raw_class"] == "unknown").any()
     if has_unknown:
         mapped = labels["raw_class"].map({"1": 1, "2": 0, "unknown": -1})
@@ -256,7 +233,6 @@ def _read_elliptic_metadata(features_path, labels_path):
             mapped = raw_num.map({0: 1, 1: 0, 2: -1})
             mapping_name = "v2"
         else:
-            # Conservative fallback: treat non-positive as unknown, 1 as fraud, others as licit.
             mapped = raw_num.map(lambda v: 1 if v == 1 else (0 if v > 1 else -1))
             mapping_name = "fallback"
 
@@ -277,10 +253,8 @@ def _read_elliptic_metadata(features_path, labels_path):
 
 
 def _adapt_elliptic_dataset(features_path, edges_path, labels_path):
-    """Adapt Elliptic files into canonical schema with robust validation."""
     logger.info("Adapting Elliptic dataset...")
     
-    # Validate and load edges
     if not os.path.exists(edges_path):
         raise FileNotFoundError(f"Elliptic edges file not found: {edges_path}")
     edges = pd.read_csv(edges_path)
@@ -288,13 +262,11 @@ def _adapt_elliptic_dataset(features_path, edges_path, labels_path):
         raise ValueError(f"Elliptic edges file missing txId1/txId2 columns. Found: {list(edges.columns)}")
     logger.info("  ✓ Edges loaded: %d rows", len(edges))
 
-    # Validate and load labels + node-level metadata
     if not os.path.exists(labels_path):
         raise FileNotFoundError(f"Elliptic labels file not found: {labels_path}")
     metadata = _read_elliptic_metadata(features_path, labels_path)
     logger.info("  ✓ Labels loaded: %d rows", len(metadata))
 
-    # Elliptic has no amount in edge list. Timestamp is derived from sender tx timestep.
     timestep_map = (
         metadata[["account_id", "time_step"]]
         .dropna(subset=["time_step"])
@@ -321,7 +293,6 @@ def _adapt_elliptic_dataset(features_path, edges_path, labels_path):
 
 
 def _time_based_split_indices(time_step_np, labeled_mask_np, y_np):
-    """Create train/val/test splits by time_step; return None when invalid."""
     time_step_np = np.asarray(time_step_np)
     labeled_mask_np = np.asarray(labeled_mask_np, dtype=bool)
 
@@ -336,7 +307,6 @@ def _time_based_split_indices(time_step_np, labeled_mask_np, y_np):
     min_ts = int(usable_steps.min())
     max_ts = int(usable_steps.max())
 
-    # Canonical Elliptic split: train [1..34], val [35..39], test [40..49]
     if min_ts == 1 and max_ts == 49:
         train_steps = usable_steps[usable_steps <= 34]
         val_steps = usable_steps[(usable_steps >= 35) & (usable_steps <= 39)]
@@ -361,7 +331,6 @@ def _time_based_split_indices(time_step_np, labeled_mask_np, y_np):
     if len(train_idx) == 0 or len(val_idx) == 0 or len(test_idx) == 0:
         return None
 
-    # Ensure train set has both classes for weighted CE and stable optimization.
     if np.unique(y_np[train_idx]).size < 2:
         return None
 
@@ -369,10 +338,8 @@ def _time_based_split_indices(time_step_np, labeled_mask_np, y_np):
 
 
 def normalize_dataset_sources():
-    """Select available source and normalize to canonical transactions + ground truth files."""
     config.ensure_dirs()
 
-    # Prefer externally sourced files if present.
     paysim_path = os.path.join(config.RAW_DATA_DIR, "paysim_transactions.csv")
     elliptic_source = _resolve_elliptic_sources()
 
@@ -388,7 +355,6 @@ def normalize_dataset_sources():
         )
         return _normalize_common_schema(tx_df, gt_df, elliptic_source["name"], allow_unlabeled=True)
 
-    # If canonical files already exist, normalize them in place.
     if os.path.exists(config.RAW_TRANSACTIONS_PATH) and os.path.exists(config.ACCOUNT_GROUND_TRUTH_PATH):
         tx_df = pd.read_csv(config.RAW_TRANSACTIONS_PATH)
         gt_df = pd.read_csv(config.ACCOUNT_GROUND_TRUTH_PATH)
@@ -400,21 +366,11 @@ def normalize_dataset_sources():
 
 
 def load_data():
-    """
-    Load normalized transactions and true account labels.
-
-    Returns:
-        tuple: (transactions_df, account_labels_dict)
-    """
     tx_df, account_labels = normalize_dataset_sources()
     return tx_df, account_labels
 
 
 def load_true_labels(G):
-    """
-    Load TRUE labels from account_ground_truth.csv.
-    These must NEVER be generated from heuristics.
-    """
     gt_path = config.ACCOUNT_GROUND_TRUTH_PATH
     gt_df = pd.read_csv(gt_path)
     gt_df["account_id"] = gt_df["account_id"].astype(str)
@@ -427,10 +383,8 @@ def load_true_labels(G):
 
 
 def build_graph(df):
-    """Build directed transaction graph from normalized transactions DataFrame."""
     logger.info("Building directed transaction graph...")
 
-    # directed because each transaction has a sender and a receiver
     G = nx.DiGraph()
 
     work = df.copy()
@@ -481,14 +435,6 @@ def build_graph(df):
 
 
 def build_edge_features(df, node_idx):
-    """
-    Build 3-dim edge feature tensor for each transaction:
-    [normalized_amount, temporal_delta_normalized, direction_flag]
-
-    direction_flag:
-      - 1.0 for forward edge (sender -> receiver)
-      - 0.0 for reverse edge (receiver -> sender)
-    """
     required = {"sender_id", "receiver_id", "amount", "timestamp"}
     if not required.issubset(df.columns):
         missing = sorted(required - set(df.columns))
@@ -519,11 +465,9 @@ def build_edge_features(df, node_idx):
         if s is None or r is None or s == r:
             continue
 
-        # forward edge
         edge_pairs.append([s, r])
         edge_attrs.append([float(amt_norm[idx]), float(time_norm[idx]), 1.0])
 
-        # reverse edge
         edge_pairs.append([r, s])
         edge_attrs.append([float(amt_norm[idx]), float(time_norm[idx]), 0.0])
 
@@ -538,12 +482,6 @@ def build_edge_features(df, node_idx):
 
 
 def build_pyg_data(G, features_df, labels_series=None):
-    """
-    Convert graph + features into a leakage-safe PyG Data object.
-
-    Uses account_ground_truth.csv as the ONLY source for y labels.
-    Exports labels to data/processed/labels.csv for dashboard compatibility.
-    """
     from torch_geometric.data import Data
     from torch_geometric.utils import add_self_loops, remove_self_loops
 
@@ -598,7 +536,6 @@ def build_pyg_data(G, features_df, labels_series=None):
     work["node_id"] = work["node_id"].astype(str)
 
     feature_cols = [c for c in full_feature_priority if c in work.columns]
-    # Include any additional numeric columns that are not already selected.
     extra_numeric = [
         c for c in work.columns
         if c != "node_id" and c not in feature_cols and np.issubdtype(work[c].dtype, np.number)
@@ -615,20 +552,17 @@ def build_pyg_data(G, features_df, labels_series=None):
             idx = node_to_idx[node_id]
             feature_matrix[idx] = [float(row[col]) for col in feature_cols]
 
-    # Build y from TRUE labels only. Unlabeled nodes use y=-1.
     ground_truth = load_true_labels(G)
     y_np = np.array([int(ground_truth.get(str(n), 0)) for n in nodes], dtype=np.int64)
     y = torch.tensor(y_np, dtype=torch.long)
     labeled_mask_np = y_np >= 0
 
-    # Export labels.csv for dashboard compatibility
     labels_export_df = pd.DataFrame({"node_id": nodes, "is_fraud": y_np})
     labels_export_path = config.LABELS_PATH
     config.ensure_dirs()
     labels_export_df.to_csv(labels_export_path, index=False)
     logger.info("  ✓ Exported labels to %s", labels_export_path)
 
-    # Elliptic: time-based split using node timesteps from raw features.
     train_idx = np.array([], dtype=np.int64)
     val_idx = np.array([], dtype=np.int64)
     test_idx = np.array([], dtype=np.int64)
@@ -665,7 +599,6 @@ def build_pyg_data(G, features_df, labels_series=None):
         except Exception as exc:
             logger.warning("  Could not apply time-based Elliptic split (%s); falling back to stratified random split", exc)
 
-    # Fallback: stratified random split on labeled nodes.
     if len(train_idx) == 0 or len(val_idx) == 0 or len(test_idx) == 0:
         labeled_idx = np.where(labeled_mask_np)[0]
         labeled_y = y_np[labeled_idx]
@@ -697,7 +630,6 @@ def build_pyg_data(G, features_df, labels_series=None):
     val_mask[val_idx] = True
     test_mask[test_idx] = True
 
-    # Fit scaler only on train nodes to avoid leakage.
     scaler = StandardScaler()
     train_mask_np = train_mask.numpy()
     feature_matrix = np.nan_to_num(feature_matrix, nan=0.0, posinf=1.0, neginf=0.0)
@@ -710,7 +642,6 @@ def build_pyg_data(G, features_df, labels_series=None):
 
     x = torch.tensor(feature_matrix, dtype=torch.float32)
 
-    # Prefer transaction-level edges so edge attributes align with real events.
     if os.path.exists(config.RAW_TRANSACTIONS_PATH):
         tx_df = pd.read_csv(config.RAW_TRANSACTIONS_PATH)
         edge_index, edge_attr = build_edge_features(tx_df, node_to_idx)
@@ -774,12 +705,6 @@ def build_pyg_data(G, features_df, labels_series=None):
 
 
 def get_pyg_data():
-    """
-    Convenience zero-argument wrapper for test harnesses.
-
-    Returns:
-        tuple: (data, scaler, node_to_idx)
-    """
     from src.features import compute_all_features
 
     df, _ = load_data()
@@ -790,7 +715,6 @@ def get_pyg_data():
     return data, scaler, node_to_idx
 
 
-# Backward-compatible aliases for existing imports.
 load_dataset = load_data
 load_ground_truth_labels = load_true_labels
 load_pyg_data = get_pyg_data

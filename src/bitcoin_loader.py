@@ -1,4 +1,3 @@
-"""Load and adapt the Elliptic Bitcoin dataset into PyG Data format."""
 
 import os
 
@@ -13,7 +12,6 @@ import config
 
 
 def _stratified_split_indices(labeled_idx, y_labeled):
-    """Create train/val/test splits on labeled nodes with stable stratification."""
     train_idx, temp_idx, y_train, y_temp = train_test_split(
         labeled_idx,
         y_labeled,
@@ -31,16 +29,6 @@ def _stratified_split_indices(labeled_idx, y_labeled):
 
 
 def load_bitcoin_dataset():
-    """
-    Load Elliptic Bitcoin dataset and return a PyG Data object.
-
-    Dataset facts:
-    - 203,769 transactions (nodes)
-    - 234,355 payment flows (edges)
-    - 166 features per node (first is time step, rest are aggregated)
-    - Labels: 1=illicit (fraud), 2=licit (normal), 0=unknown
-    - Only a subset of nodes are labeled
-    """
     raw = os.path.join(config.RAW_DATA_DIR, "bitcoin")
 
     print("Loading Elliptic Bitcoin dataset...")

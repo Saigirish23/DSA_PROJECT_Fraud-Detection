@@ -1,9 +1,7 @@
-"""Tuned Elliptic training with staged ablations (Fix1 -> Fix4)."""
 
 import os
 import sys
 
-# Allow running as `python src/bitcoin_train_tuned.py`.
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -30,7 +28,6 @@ from src.train import get_gnn_predictions, train_model
 
 
 class FocalLoss(nn.Module):
-    """Focal loss for imbalanced binary fraud classification."""
 
     def __init__(self, alpha=None, gamma=2.0):
         super().__init__()
@@ -72,7 +69,6 @@ def _compute_class_alpha(y_train, device):
     counts = np.bincount(y_train, minlength=2)
     counts[counts == 0] = 1
     alpha_np = np.array([len(y_train) / (2.0 * c) for c in counts], dtype=np.float32)
-    # Normalize and clip weights so weighted loss remains numerically stable.
     alpha_np = alpha_np / max(alpha_np.mean(), 1e-8)
     alpha_np = np.clip(alpha_np, 0.25, 4.0)
     alpha = torch.tensor(alpha_np, dtype=torch.float32, device=device)
@@ -93,7 +89,6 @@ def train_stage(
     patience=40,
     ce_label_smoothing=0.02,
 ):
-    """Train one stage configuration and return trained model + metrics."""
     data, scaler, feat_cols = load_elliptic_full()
     device = "cuda" if torch.cuda.is_available() else "cpu"
     data = data.to(device)
@@ -203,7 +198,6 @@ def train_stage(
 
 
 def sweep_threshold(model, data, device, thresholds=None):
-    """Sweep classification threshold on validation split and return best by F1."""
     if thresholds is None:
         thresholds = np.arange(0.10, 0.70, 0.05)
 
@@ -245,13 +239,11 @@ def run_fix_sequence(
     threshold=0.35,
     patience=40,
 ):
-    """Run Fix 1->4 in order and persist stagewise metrics."""
     config.ensure_dirs()
 
     stage_results = []
     combined_history = []
 
-    # Fix 1: Full features, baseline architecture/loss.
     m1, r1, h1, data, _ = train_stage(
         stage_name="fix1_full_features",
         model_type="fraudgcn",
@@ -268,7 +260,6 @@ def run_fix_sequence(
     stage_results.append(r1)
     combined_history.extend(h1)
 
-    # Fix 2: Deeper architecture, CE loss.
     m2, r2, h2, data, _ = train_stage(
         stage_name="fix2_deeper_model",
         model_type="ellipticgnn",
@@ -285,7 +276,6 @@ def run_fix_sequence(
     stage_results.append(r2)
     combined_history.extend(h2)
 
-    # Fix 3: Deeper architecture + focal loss.
     m3, r3, h3, data, _ = train_stage(
         stage_name="fix3_focal_loss",
         model_type="ellipticgnn",
@@ -302,7 +292,6 @@ def run_fix_sequence(
     stage_results.append(r3)
     combined_history.extend(h3)
 
-    # Fix 4: Threshold sweep on Fix 3 model.
     device = "cuda" if torch.cuda.is_available() else "cpu"
     best_t, sweep_rows = sweep_threshold(m3, data, device)
 
@@ -358,7 +347,6 @@ def tune_and_train(
     threshold=0.35,
     patience=40,
 ):
-    """Train AMLDetector on Elliptic data and return (model, metrics, history)."""
     del hidden, dropout, lr, weight_decay, epochs, gamma, threshold, patience
 
     data, _, _ = load_elliptic_full()
@@ -377,7 +365,6 @@ def tune_and_train(
     metrics = compute_metrics(y_true, y_pred, y_prob)
     metrics["threshold"] = best_threshold
 
-    # Persist outputs compatible with dashboard/result consumers.
     config.ensure_dirs()
     pd.DataFrame([metrics]).to_csv(os.path.join(config.RESULTS_DIR, "elliptic_tuned_metrics.csv"), index=False)
 

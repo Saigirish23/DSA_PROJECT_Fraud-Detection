@@ -1,4 +1,3 @@
-"""Deeper GNN model for full-feature Elliptic Bitcoin tuning."""
 
 import torch
 import torch.nn as nn
@@ -7,7 +6,6 @@ from torch_geometric.nn import BatchNorm, GATConv, GCNConv, SAGEConv
 
 
 class EllipticGNN(nn.Module):
-    """3-layer GNN with residual and BN for 166-feature Elliptic input."""
 
     def __init__(self, num_features, hidden=128, out=2, dropout=0.4):
         super().__init__()

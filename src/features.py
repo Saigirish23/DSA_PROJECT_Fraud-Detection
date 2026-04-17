@@ -1,4 +1,3 @@
-"""Feature engineering for AML graph learning."""
 
 import importlib
 import os
@@ -33,7 +32,6 @@ FULL_FEATURE_COLUMNS = [
 
 
 def _coerce_transactions(transactions_df=None):
-    """Load or normalize transactions with timestamp and amount fields."""
     if transactions_df is None:
         if not os.path.exists(config.RAW_TRANSACTIONS_PATH):
             return None
@@ -61,7 +59,6 @@ def _coerce_transactions(transactions_df=None):
 
 
 def compute_degree(G):
-    """Compute in/out/total degree."""
     degree_features = {}
     for node in G.nodes():
         in_deg = int(G.in_degree(node))
@@ -75,17 +72,14 @@ def compute_degree(G):
 
 
 def compute_clustering(G):
-    """Compute clustering coefficient on undirected projection."""
     return nx.clustering(G.to_undirected())
 
 
 def compute_pagerank(G):
-    """Compute PageRank for directed graph."""
     return nx.pagerank(G, alpha=0.85, max_iter=100, tol=1e-6)
 
 
 def _compute_base_features_cpp_or_nx(G):
-    """Compute canonical structural features with C++ fast path and NetworkX fallback."""
     records = None
 
     try:
@@ -145,7 +139,6 @@ def _compute_base_features_cpp_or_nx(G):
 
 
 def _compute_temporal_features(nodes, tx):
-    """Compute temporal burst and activity features over 7-day sliding windows."""
     default_row = {
         "tx_count_window": 0.0,
         "amount_std_window": 0.0,
@@ -155,7 +148,6 @@ def _compute_temporal_features(nodes, tx):
     if tx is None or len(tx) == 0:
         return pd.DataFrame([{"node_id": str(n), **default_row} for n in nodes])
 
-    # Build endpoint-wise transaction view so each transaction contributes to both nodes.
     left = tx[["sender_id", "receiver_id", "amount", "timestamp_int", "hour"]].rename(
         columns={"sender_id": "node_id", "receiver_id": "peer_id"}
     )
@@ -220,7 +212,6 @@ def _compute_temporal_features(nodes, tx):
 
 
 def _derive_heuristic_flags(base_df):
-    """Generate heuristic flags for neighbor risk aggregation."""
     w = config.HEURISTIC_WEIGHTS
 
     tmp = base_df.copy()
@@ -246,7 +237,6 @@ def _derive_heuristic_flags(base_df):
 
 
 def _local_efficiency_from_neighbors(undirected_graph, node):
-    """Compute harmonic mean of inverse shortest paths inside node's neighbor ego-subgraph."""
     neighbors = list(undirected_graph.neighbors(node))
     if len(neighbors) < 2:
         return 0.0
@@ -274,7 +264,6 @@ def _local_efficiency_from_neighbors(undirected_graph, node):
 
 
 def _compute_ego_topological_features(G, base_df):
-    """Compute ego-neighborhood and topological descriptors."""
     undirected = G.to_undirected()
     bridges = set(nx.articulation_points(undirected)) if undirected.number_of_nodes() else set()
 
@@ -313,7 +302,6 @@ def _compute_ego_topological_features(G, base_df):
 
 
 def _correlation_report(features_df):
-    """Log feature-label correlations against ground truth labels when available."""
     gt_path = config.ACCOUNT_GROUND_TRUTH_PATH
     if not os.path.exists(gt_path):
         logger.warning("Ground truth file not found for correlation report: %s", gt_path)
@@ -351,7 +339,6 @@ def _correlation_report(features_df):
 
 
 def compute_features(G, use_dynamic=False, transactions_df=None):
-    """Compute canonical and upgraded AML features for each node."""
     logger.info("Computing AML feature matrix...")
 
     nodes = [str(n) for n in sorted(G.nodes())]
@@ -393,7 +380,6 @@ def compute_features(G, use_dynamic=False, transactions_df=None):
     full_path = os.path.join(config.PROCESSED_DATA_DIR, "node_features_full.csv")
     full_df.to_csv(full_path, index=False)
 
-    # Keep existing downstream compatibility path.
     full_df.to_csv(config.NODE_FEATURES_PATH, index=False)
 
     logger.info("Saved full feature matrix: %s", full_path)
@@ -423,6 +409,5 @@ if __name__ == "__main__":
     logger.info("Shape: %s", features_df.shape)
 
 
-# Backward-compatible aliases.
 compute_clustering_coefficient = compute_clustering
 compute_all_features = compute_features

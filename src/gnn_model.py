@@ -1,4 +1,3 @@
-"""AML-focused PyTorch Geometric model definitions."""
 
 import torch
 import torch.nn as nn
@@ -11,18 +10,6 @@ logger = config.setup_logging(__name__)
 
 
 class AMLDetector(nn.Module):
-    """
-    Architecture designed specifically for sparse AML graphs.
-
-    Design decisions:
-    1. GATv2Conv: dynamic attention (not static) for sparse local neighborhoods.
-    2. TransformerConv: global-style attention mixing for disconnected components.
-    3. JK (LSTM): preserve multi-scale signals from all message-passing depths.
-    4. Edge feature injection: use amount/time/direction to avoid topology-only bias.
-    5. BatchNorm after each conv: stabilize optimization across sparse components.
-    6. Residual links: keep gradients and prevent deep sparse-network collapse.
-    7. 3-layer classifier head: decouple embedding learning from final decision boundary.
-    """
 
     def __init__(
         self,
@@ -41,21 +28,18 @@ class AMLDetector(nn.Module):
         self.dropout = float(dropout)
         self.edge_dim = int(edge_dim)
 
-        # Project raw node features into a stable representation before attention layers.
         self.input_proj = nn.Sequential(
             nn.Linear(num_features, 256),
             nn.LayerNorm(256),
             nn.ELU(),
         )
 
-        # Encode edge attributes so message passing can condition on transaction metadata.
         self.edge_mlp = nn.Sequential(
             nn.Linear(3, 32),
             nn.ELU(),
             nn.Linear(32, self.edge_dim),
         )
 
-        # Dynamic attention for first-hop sparse neighborhood modeling.
         self.conv1 = GATv2Conv(
             in_channels=256,
             out_channels=self.hidden_dim,
@@ -67,7 +51,6 @@ class AMLDetector(nn.Module):
         )
         self.bn1 = nn.BatchNorm1d(self.hidden_dim * self.heads)
 
-        # Second dynamic attention block with residual learning over Layer 1 output.
         self.conv2 = GATv2Conv(
             in_channels=self.hidden_dim * self.heads,
             out_channels=self.hidden_dim,
@@ -79,7 +62,6 @@ class AMLDetector(nn.Module):
         )
         self.bn2 = nn.BatchNorm1d(self.hidden_dim * self.heads)
 
-        # Transformer-style aggregation introduces broader context than local GAT alone.
         self.conv3 = TransformerConv(
             in_channels=self.hidden_dim * self.heads,
             out_channels=self.hidden_dim,
@@ -91,11 +73,9 @@ class AMLDetector(nn.Module):
         )
         self.bn3 = nn.BatchNorm1d(self.hidden_dim * self.heads)
 
-        # LSTM-based JK keeps useful information from shallow and deeper layers together.
         self.jk = JumpingKnowledge(mode="lstm", channels=self.hidden_dim * self.heads, num_layers=3)
         self.jk_proj = nn.Linear(self.hidden_dim * self.heads, self.hidden_dim)
 
-        # Dedicated classifier head separates representation learning from final classification.
         self.classifier = nn.Sequential(
             nn.Linear(self.hidden_dim, 64),
             nn.ELU(),
@@ -116,14 +96,12 @@ class AMLDetector(nn.Module):
         )
 
     def _encode_edge_attr(self, edge_attr, edge_index):
-        """Prepare optional edge features for attention layers with graceful fallback."""
         if edge_attr is None:
             edge_attr = torch.zeros(edge_index.size(1), 3, device=edge_index.device, dtype=torch.float32)
 
         if edge_attr.dim() == 1:
             edge_attr = edge_attr.unsqueeze(1)
 
-        # Canonicalize to [amount, temporal_delta, direction_flag].
         if edge_attr.size(1) < 3:
             pad = torch.zeros(
                 edge_attr.size(0),
@@ -135,7 +113,6 @@ class AMLDetector(nn.Module):
         elif edge_attr.size(1) > 3:
             edge_attr = edge_attr[:, :3]
 
-        # If edge_attr length mismatches edge count, skip rather than crash.
         if edge_attr.size(0) != edge_index.size(1):
             edge_attr = torch.zeros(edge_index.size(1), 3, device=edge_index.device, dtype=torch.float32)
 
@@ -181,7 +158,6 @@ class AMLDetector(nn.Module):
         return emb
 
 
-# Backward compatibility aliases expected by existing code paths.
 FraudGCN = AMLDetector
 GCN = AMLDetector
 
