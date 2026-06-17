@@ -198,3 +198,4 @@ dsa_project/
   * `data/processed/`
   * `outputs/results/`
 * If the dashboard fails to start because port **5000** is already in use, terminate the existing process and restart the server.
+
